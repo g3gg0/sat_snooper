@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaliProject version="3.2" title="sat_snooper" device="LCMXO2-256HC-5SG32C" default_implementation="test_firmware">
+    <Options/>
+    <Implementation title="test_firmware" dir="test_firmware" description="test_firmware" synthesis="lse" default_strategy="Strategy1">
+        <Options def_top="top" top="blinky"/>
+        <Source name="LED.v" type="Verilog" type_short="Verilog">
+            <Options top_module="blinky"/>
+        </Source>
+        <Source name="top.v" type="Verilog" type_short="Verilog">
+            <Options/>
+        </Source>
+        <Source name="tuner.v" type="Verilog" type_short="Verilog">
+            <Options/>
+        </Source>
+        <Source name="I2S.v" type="Verilog" type_short="Verilog">
+            <Options/>
+        </Source>
+        <Source name="mpeg_ts_sync_pid.v" type="Verilog" type_short="Verilog">
+            <Options/>
+        </Source>
+        <Source name="sat_snooper.lpf" type="Logic Preference" type_short="LPF">
+            <Options/>
+        </Source>
+    </Implementation>
+    <Strategy name="Strategy1" file="sat_snooper1.sty"/>
+</BaliProject>
