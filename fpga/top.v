@@ -28,21 +28,23 @@ module top
     input SYNC
 );
 	
+    wire tuner_led_toggle;
+	wire osc;
+	
 	/* -- internal oscillator ------------------------------------------- */
-	wire clk;
-	defparam i_osc.NOM_FREQ = "4.29";
-	OSCH i_osc ( .STDBY (1'b0), .OSC (clk), .SEDSTDBY () );
+	defparam i_osc.NOM_FREQ = "2.29";
+	OSCH i_osc ( .STDBY (1'b0), .OSC (osc), .SEDSTDBY () );
 
     /* -- LED fade submodule ------------------------------- */
     wire blinky_led_signal; /* Intermediate wire for blinky output */
     blinky u_led (
-        .LED_OD (blinky_led_signal),
-		.clk(clk)
+		.clk (osc),
+        .led (blinky_led_signal)
     );
 
     /* Combine blinky output with unused inputs and sync toggle to drive LED_OD */
-    wire tuner_led_toggle;
-    assign LED_OD = blinky_led_signal;// ^ (PROGRAMN & SCL & SDA & SYNC & tuner_led_toggle);
+    wire led_signal = !blinky_led_signal ^ PROGRAMN ^ SCL ^ SDA ^ SYNC ^ tuner_led_toggle;
+    assign LED_OD = led_signal ? 1'b0 : 1'bz;
 	
     /* Wires for streaming data from tuner to i2s_tx */
     wire [7:0] tuner_stream_data;

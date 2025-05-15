@@ -3,8 +3,8 @@
 
 module blinky
 (
-    output LED_OD,                        /* external LED plus pull-up */
-	input clk
+	input clk,
+    output led
 );
 
 
@@ -20,7 +20,7 @@ reg [12:0] step_timer    = 0;            /* counts 0…8191              */
 always @(posedge clk) begin
     pwm_counter <= pwm_counter + 1'b1;
 
-    if (step_timer == 13'd2047) begin
+    if (step_timer == 13'd4096) begin
         step_timer <= 0;
         if (fade_up) begin
             if (brightness < 8'd255) begin
@@ -41,7 +41,6 @@ always @(posedge clk) begin
 end
 
 /* -- open-drain drive (0 = sink, Z = off) ------------------------- */
-wire pwm_out = (pwm_counter < brightness);
-assign LED_OD = pwm_out ? 1'b0 : 1'bz;
+assign led = 0;// (pwm_counter < brightness);
 
 endmodule
