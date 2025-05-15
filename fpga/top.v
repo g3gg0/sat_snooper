@@ -28,22 +28,17 @@ module top
     input SYNC
 );
 	
+	/* -- internal oscillator ------------------------------------------- */
+	wire clk;
+	defparam i_osc.NOM_FREQ = "4.29";
+	OSCH i_osc ( .STDBY (1'b0), .OSC (clk), .SEDSTDBY () );
+
     /* -- LED fade submodule ------------------------------- */
     wire blinky_led_signal; /* Intermediate wire for blinky output */
     blinky u_led (
         .LED_OD (blinky_led_signal),
 		.clk(clk)
     );
-
-	/* -- internal oscillator ------------------------------------------- */
-	wire clk;
-	OSCH #(
-		.NOM_FREQ("4.29")                    /* MHz */
-	) i_osc (
-		.STDBY    (1'b0),
-		.OSC      (clk),
-		.SEDSTDBY ()
-	);
 
     /* Combine blinky output with unused inputs and sync toggle to drive LED_OD */
     wire tuner_led_toggle;

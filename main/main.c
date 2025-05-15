@@ -14,13 +14,14 @@
 #include "esp_console.h"
 #include "esp_vfs_dev.h"
 #include "esp_vfs_fat.h"
+#include "esp_wifi.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "cmd_system.h"
 #include "cmd_wifi.h"
 #include "cmd_nvs.h"
 
-#include "cx24116.h"
+#include "tuner.h"
 #include "voltage.h"
 #include "i2c.h"
 #include "fpga.h"
@@ -78,12 +79,9 @@ static void initialize_nvs(void)
 
 void app_main(void)
 {
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_init());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_loop_create_default());
+
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     /* Prompt to be printed before each line.
@@ -128,7 +126,7 @@ void app_main(void)
     voltage_init();
     i2c_init();
     fpga_init();
-    register_cx24116_commands();
+    tuner_init();
 
     wifi_start();
     app_start_telnet_server();

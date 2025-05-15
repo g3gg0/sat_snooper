@@ -20,19 +20,16 @@ void voltage_select(voltage_t voltage)
     case VOLTAGE_OFF:
         gpio_set_level(GPIO_LNB_ENABLE, 0);
         gpio_set_level(GPIO_TUNER_3V3_SW, 0);
-        gpio_set_level(GPIO_TUNER_RESET, 0);
         break;
     case VOLTAGE_13V:
         gpio_set_level(GPIO_LNB_13_18V, 0);
         gpio_set_level(GPIO_LNB_ENABLE, 1);
         gpio_set_level(GPIO_TUNER_3V3_SW, 1);
-        gpio_set_level(GPIO_TUNER_RESET, 1);
         break;
     case VOLTAGE_18V:
         gpio_set_level(GPIO_LNB_13_18V, 1);
         gpio_set_level(GPIO_LNB_ENABLE, 1);
         gpio_set_level(GPIO_TUNER_3V3_SW, 1);
-        gpio_set_level(GPIO_TUNER_RESET, 1);
         break;
     }
 }

@@ -149,7 +149,7 @@ static void got_ip_event_handler(void* arg, esp_event_base_t event_base,
     esp_err_t err = esp_wifi_get_config(ESP_IF_WIFI_STA, &current_config);
     if (err == ESP_OK) {
         if (strlen((const char*)current_config.sta.ssid) > 0) { /* Ensure SSID is not empty */
-            ESP_LOGI(TAG, "Successfully connected to SSID: %s. Saving credentials to NVS.", (char*)current_config.sta.ssid);
+            ESP_LOGI(TAG, "Successfully connected to SSID: %s/%s. Saving credentials to NVS.", (char*)current_config.sta.ssid, (char*)current_config.sta.password);
             nvs_handle_t my_handle;
             err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &my_handle);
             if (err == ESP_OK) {
@@ -183,8 +183,6 @@ static void got_ip_event_handler(void* arg, esp_event_base_t event_base,
 /*init wifi as sta and start wps*/
 void wifi_start(void)
 {
-    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_init());
-    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_loop_create_default());
     esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
     assert(sta_netif);
 

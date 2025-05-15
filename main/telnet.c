@@ -48,7 +48,7 @@ static vprintf_like_t s_original_vprintf_handler = NULL;
 #define TELNET_KEEPALIVE_INTERVAL          5  /* Keepalive interval time (seconds) */
 #define TELNET_KEEPALIVE_COUNT             3  /* Keepalive packet retry count */
 #define TELNET_RX_BUFFER_SIZE              128
-#define TELNET_TASK_STACK_SIZE             4096
+#define TELNET_TASK_STACK_SIZE             6188
 #define TELNET_TASK_PRIORITY               5
 #define TELNET_MAX_CONNECTIONS             1 /* Max simultaneous connections (listen backlog) */
 
@@ -348,11 +348,11 @@ static void telnet_server_main_task(void *pvParameters)
     ESP_LOGI(TAG_TELNET, "Socket bound to port %d", TELNET_PORT);
 
     /* Set our custom vprintf handler. Store the original one. */
-    /* This should ideally be done only once if the task persists. */
+    /* This should ideally be done only once if the task persists.
     if (s_original_vprintf_handler == NULL) {
         s_original_vprintf_handler = esp_log_set_vprintf(telnet_vprintf_redirect);
         ESP_LOGI(TAG_TELNET, "Telnet vprintf redirector installed.");
-    }
+    } */
 
 
     err = listen(listen_sock, TELNET_MAX_CONNECTIONS);

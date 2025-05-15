@@ -45,6 +45,8 @@ static struct
     struct arg_int *address;
     struct arg_int *wdata;    /* Array of data bytes to write */
     struct arg_int *rbytes;   /* Number of bytes to read */
+    struct arg_int *cyclic_ms; /* Optional: cyclic delay in ms */
+    struct arg_int *cyclic_count; /* Optional: number of repetitions */
     struct arg_end *end_arg;
 } i2c_rw_args;
 
@@ -212,14 +214,34 @@ static int do_i2c_rw_cmd(int argc, char **argv)
     /* Check if mandatory arguments are provided */
     if (i2c_rw_args.address->count == 0 || i2c_rw_args.wdata->count == 0 || i2c_rw_args.rbytes->count == 0)
     {
-        ESP_LOGE(TAG, "Address, at least one data byte to write, and number of bytes to read (-r) are required.");
-        /* arg_print_usage(stderr, i2c_rw_args.end_arg, argv[0], NULL); */
+        ESP_LOGE(TAG, "Address, at least one data byte to write (-w), and number of bytes to read (-r) are required.");
         return 1;
     }
 
     uint8_t addr = (uint8_t)i2c_rw_args.address->ival[0];
     int num_bytes_to_write = i2c_rw_args.wdata->count;
     int num_bytes_to_read = i2c_rw_args.rbytes->ival[0];
+
+    int cyclic_ms = 0;
+    int cyclic_count = 1; /* Default to 1 execution if --cyclic is not provided */
+
+    if (i2c_rw_args.cyclic_ms->count > 0 && i2c_rw_args.cyclic_count->count > 0) {
+        cyclic_ms = i2c_rw_args.cyclic_ms->ival[0];
+        cyclic_count = i2c_rw_args.cyclic_count->ival[0];
+        if (cyclic_ms < 0) {
+            ESP_LOGE(TAG, "Cyclic delay (ms) must be non-negative.");
+            return 1;
+        }
+        if (cyclic_count <= 0) {
+            ESP_LOGE(TAG, "Cyclic count must be positive.");
+            return 1;
+        }
+        ESP_LOGI(TAG, "Cyclic mode: %d times, %d ms delay", cyclic_count, cyclic_ms);
+    } else if (i2c_rw_args.cyclic_ms->count > 0 || i2c_rw_args.cyclic_count->count > 0) {
+        ESP_LOGE(TAG, "Both <ms> and <count> must be provided for --cyclic option.");
+        return 1;
+    }
+
 
     if (num_bytes_to_write <= 0 || num_bytes_to_write > MAX_I2C_WRITE_BYTES)
     {
@@ -267,30 +289,48 @@ static int do_i2c_rw_cmd(int argc, char **argv)
         sprintf(temp_byte_str, "0x%02X ", w_data_buf[i]);
         strcat(ptr_write, temp_byte_str);
     }
+    
+    int overall_ret = 0;
 
-    ESP_LOGI(TAG, "Writing %d byte(s) [%s] to I2C addr 0x%02X, then reading %d byte(s)...", num_bytes_to_write, hex_buf_write, addr, num_bytes_to_read);
-
-    int ret = i2c_write_read(addr, w_data_buf, num_bytes_to_write, r_data_buf, num_bytes_to_read);
-
-    if (ret == 0)
-    {
-        char hex_buf_read[num_bytes_to_read * 4 + 1];
-        char *ptr_read = hex_buf_read;
-        for (int i = 0; i < num_bytes_to_read; ++i)
-        {
-            sprintf(ptr_read, "0x%02X ", r_data_buf[i]);
-            ptr_read += strlen(ptr_read);
+    for (int cycle = 0; cycle < cyclic_count; ++cycle) {
+        if (cyclic_count > 1) {
+            ESP_LOGI(TAG, "Cycle %d/%d: Writing %d byte(s) [%s] to I2C addr 0x%02X, then reading %d byte(s)...", 
+                     cycle + 1, cyclic_count, num_bytes_to_write, hex_buf_write, addr, num_bytes_to_read);
+        } else {
+            ESP_LOGI(TAG, "Writing %d byte(s) [%s] to I2C addr 0x%02X, then reading %d byte(s)...", num_bytes_to_write, hex_buf_write, addr, num_bytes_to_read);
         }
-        ESP_LOGI(TAG, "Read data: %s", hex_buf_read);
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Failed to write/read I2C address 0x%02X.", addr);
+
+        int ret = i2c_write_read(addr, w_data_buf, num_bytes_to_write, r_data_buf, num_bytes_to_read);
+
+        if (ret == 0)
+        {
+            char hex_buf_read[num_bytes_to_read * 4 + 1];
+            char *ptr_read = hex_buf_read;
+            ptr_read[0] = '\0'; // Initialize for strcat or sprintf
+            for (int i = 0; i < num_bytes_to_read; ++i)
+            {
+                char temp_byte_str_read[6];
+                sprintf(temp_byte_str_read, "0x%02X ", r_data_buf[i]);
+                strcat(ptr_read, temp_byte_str_read);
+            }
+            ESP_LOGI(TAG, "Read data: %s", hex_buf_read);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to write/read I2C address 0x%02X in cycle %d.", addr, cycle + 1);
+            overall_ret = 1; /* Mark failure if any cycle fails */
+            if (cyclic_count > 1) { /* Potentially break or continue based on desired error handling for cyclic */
+                 /* For now, continue all cycles but report overall failure */
+            }
+        }
+        if (cycle < cyclic_count - 1) {
+            vTaskDelay(pdMS_TO_TICKS(cyclic_ms));
+        }
     }
 
     free(w_data_buf);
     free(r_data_buf);
-    return ret == 0 ? 0 : 1;
+    return overall_ret;
 }
 
 void register_i2c_commands(void) /* Renamed from register_i2cscan_command */
@@ -340,12 +380,14 @@ void register_i2c_commands(void) /* Renamed from register_i2cscan_command */
     i2c_rw_args.address = arg_int1(NULL, NULL, "<addr>", "I2C device address (e.g., 0x50 or 80)");
     i2c_rw_args.wdata = arg_intn("w", "wdata", "<byte>", 1, MAX_I2C_WRITE_BYTES, "Data byte(s) to write");
     i2c_rw_args.rbytes = arg_int1("r", "rbytes", "<nbytes>", "Number of bytes to read (1-256)");
-    i2c_rw_args.end_arg = arg_end(MAX_I2C_WRITE_BYTES + 2); /* Max errors: 1 for addr, N for wdata, 1 for rbytes */
+    i2c_rw_args.cyclic_ms = arg_int0(NULL, "cyclic", "<ms> <count>", "Optional: Repeat <count> times with <ms> delay. Both ms and count required if used.");
+    i2c_rw_args.cyclic_count = arg_int0(NULL, NULL, "<count>", "Number of repetitions for --cyclic");
+    i2c_rw_args.end_arg = arg_end(MAX_I2C_WRITE_BYTES + 4); /* Max errors: 1 for addr, N for wdata, 1 for rbytes, 1 for ms, 1 for count */
 
     const esp_console_cmd_t i2c_rw_cmd_config = {
         .command = "i2c_rw",
-        .help = "Write byte(s) to an I2C device then read N bytes. Usage: i2c_rw <addr> -w <byte1> [byte2...] -r <nbytes>",
-        .hint = " <addr> -w <byte1>... -r <nbytes>",
+        .help = "Write byte(s) to an I2C device then read N bytes. Usage: i2c_rw <addr> -w <byte1>... -r <nbytes> [--cyclic <ms> <count>]",
+        .hint = " <addr> -w <byte1>... -r <nbytes> [--cyclic <ms> <count>]",
         .func = &do_i2c_rw_cmd,
         .argtable = &i2c_rw_args
     };
@@ -425,8 +467,8 @@ void i2c_init()
         .mode = I2C_MODE_MASTER,
         .sda_io_num = GPIO_I2C_SDA,
         .scl_io_num = GPIO_I2C_SCL,
-        .sda_pullup_en = 0,
-        .scl_pullup_en = 0,
+        .sda_pullup_en = 1,
+        .scl_pullup_en = 1,
         .master.clk_speed = 100000,
         .clk_flags = 0};
     i2c_param_config(I2C_NUM_0, &conf);

@@ -3,19 +3,9 @@
 
 module blinky
 (
-    output LED_OD//,                        /* external LED plus pull-up */
-	//input clk
+    output LED_OD,                        /* external LED plus pull-up */
+	input clk
 );
-
-	/* -- internal oscillator ------------------------------------------- */
-	wire clk;
-	OSCH #(
-		.NOM_FREQ("4.29")                    /* MHz */
-	) i_osc (
-		.STDBY    (1'b0),
-		.OSC      (clk),
-		.SEDSTDBY ()
-	);
 
 
 /* -- fade logic: 8-bit PWM + 512-step ramp (~1 Hz) ----------------- */
