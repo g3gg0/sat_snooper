@@ -62,27 +62,15 @@ static int telnet_vprintf_redirect(const char *format, va_list args)
     int ret = 0;
 
     /* Call the original vprintf handler to output to UART/default log. */
-    if (s_original_vprintf_handler)
-    {
-        ret = s_original_vprintf_handler(format, args);
-    }
-    else
-    {
-        /* Fallback if original handler is somehow not set (should not happen). */
-        ret = vprintf(format, args);
-    }
 
     /* If a Telnet client is connected, send the log to them. */
     if (s_telnet_client_sock == -1)
     {
-        return 0;
+        return s_original_vprintf_handler(format, args);
     }
 
     char temp_buffer[256]; /* Buffer for the formatted log line. */
-    va_list args_copy;
-    va_copy(args_copy, args); /* Copy va_list as it's consumed by vsnprintf. */
-    int len = vsnprintf(temp_buffer, sizeof(temp_buffer), format, args_copy);
-    va_end(args_copy);
+    int len = vsnprintf(temp_buffer, sizeof(temp_buffer), format, args);
 
     if (len > 0)
     {
