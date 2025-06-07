@@ -41,6 +41,6 @@ always @(posedge clk) begin
 end
 
 /* -- open-drain drive (0 = sink, Z = off) ------------------------- */
-assign led = 0;// (pwm_counter < brightness);
+assign led = (pwm_counter < brightness);
 
 endmodule

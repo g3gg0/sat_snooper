@@ -2,12 +2,12 @@
 <BaliProject version="3.2" title="sat_snooper" device="LCMXO2-256HC-5SG32C" default_implementation="test_firmware">
     <Options/>
     <Implementation title="test_firmware" dir="test_firmware" description="test_firmware" synthesis="lse" default_strategy="Strategy1">
-        <Options def_top="top" top="blinky"/>
+        <Options def_top="top" top="top"/>
         <Source name="LED.v" type="Verilog" type_short="Verilog">
-            <Options top_module="blinky"/>
+            <Options/>
         </Source>
         <Source name="top.v" type="Verilog" type_short="Verilog">
-            <Options/>
+            <Options top_module="top"/>
         </Source>
         <Source name="tuner.v" type="Verilog" type_short="Verilog">
             <Options/>
