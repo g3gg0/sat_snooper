@@ -119,7 +119,7 @@ MODULE_PARM_DESC(toneburst, "DiSEqC toneburst 0=OFF, 1=TONE CACHE, "\
 	"2=MESSAGE CACHE (default:1)");
 
 /* SNR measurements */
-static int esno_snr;
+static int esno_snr = 0;
 module_param(esno_snr, int, 0644);
 MODULE_PARM_DESC(esno_snr, "SNR return units, 0=PERCENTAGE 0-100, "\
 	"1=ESNO(db * 10) (default:0)");

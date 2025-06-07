@@ -508,7 +508,7 @@ CLEAN_UP_SOCKET:
  *
  *
  */
-void app_start_telnet_server(void) /* Renamed to avoid conflict with potential framework start_ functions */
+void telnet_start(void) /* Renamed to avoid conflict with potential framework start_ functions */
 {
     /*
      * It's assumed that network interface (Wi-Fi or Ethernet) has been initialized

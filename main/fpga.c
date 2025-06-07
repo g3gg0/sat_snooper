@@ -629,11 +629,12 @@ void fpga_init()
     register_fpga_status_command();
     register_fpga_dl_command();
     register_fpga_erase_command();
-    register_fpga_prog_command(); /* Register the new prog command */
+    register_fpga_prog_command(); 
 
-    gpio_set_level(GPIO_FPGA_PROGRAMN, 0);
-    fpga_bitstream_dl("/storage/fpga.bit");
-    gpio_set_level(GPIO_FPGA_PROGRAMN, 1);
+    //gpio_set_level(GPIO_FPGA_PROGRAMN, 0);
+    //do_fpga_status(0, NULL);
+    //fpga_bitstream_dl("/storage/fpga.bit");
+    //gpio_set_level(GPIO_FPGA_PROGRAMN, 1);
 
     fpga_start_socket_listener(); // Start the socket listener
 }

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <limits.h>
+#include <errno.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -81,16 +82,13 @@ struct kref
 
 //#define __func__ ""
 
-#define EOPNOTSUPP -1
-#define ETIMEDOUT -1
-#define EINVAL -1
-#define ENOMEM -1
-#define ENOMEM -1
 #define EREMOTEIO -1
 #define GFP_KERNEL -1
 #define KERN_ERR "E"
 
+#ifndef HZ
 #define HZ 1000
+#endif
 
 // #define BIT(x) (1<<(x))
 #define msleep(x) vTaskDelay(pdMS_TO_TICKS(x))

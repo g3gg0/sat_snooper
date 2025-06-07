@@ -24,6 +24,8 @@
 #include "driver/gpio.h"
 
 static const char *TAG_CX = "cx24116";
+static bool tuner_initialized = false;
+static bool tuner_reset_active = true;
 
 #define CX24116_DEFAULT_ADDRESS 0x55
 /* Default MPEG clock polarity from Linux driver */
@@ -69,8 +71,6 @@ enum cx24116_cmds
 };
 
 #define CX24116_ARGLEN (0x1e)
-
-
 
 /* --- Variables for Linux-style driver integration --- */
 static struct dvb_frontend *g_linux_dvb_frontend = NULL;
@@ -143,8 +143,6 @@ static struct
     struct arg_int *voltage; /* 0 for 13V, 1 for 18V */
     struct arg_end *end;
 } tuner_voltage_cmd_args;
-
-
 
 int tuner_reset(struct dvb_frontend *fe)
 {
@@ -274,17 +272,12 @@ static int do_tuner_status_cmd(int argc, char **argv)
     return 0;
 }
 
-static int do_tuner_init_cmd(int argc, char **argv)
+int tuner_init(uint8_t mpeg_clk_pol)
 {
-    int nerrors = arg_parse(argc, argv, (void **)&tuner_init_args);
-    if (nerrors != 0)
+    if(tuner_reset_get())
     {
-        arg_print_errors(stderr, tuner_init_args.end, argv[0]);
-        return 1;
+        return -1;
     }
-
-    uint8_t mpeg_clk_pol = tuner_init_args.mpeg_clk_pol->count > 0 ? tuner_init_args.mpeg_clk_pol->ival[0] : CX24116_DEFAULT_MPEG_CLK_POL;
-
     ESP_LOGI(TAG_CX, "Initializing tuner with Linux driver logic...");
     ESP_LOGI(TAG_CX, "I2C Addr: 0x%02X, MPEG Clk Pol: 0x%02X",
              CX24116_DEFAULT_ADDRESS, mpeg_clk_pol);
@@ -346,6 +339,19 @@ static int do_tuner_init_cmd(int argc, char **argv)
         return 1;
     }
     return 0;
+}
+
+static int do_tuner_init_cmd(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&tuner_init_args);
+    if (nerrors != 0)
+    {
+        arg_print_errors(stderr, tuner_init_args.end, argv[0]);
+        return 1;
+    }
+
+    uint8_t mpeg_clk_pol = tuner_init_args.mpeg_clk_pol->count > 0 ? tuner_init_args.mpeg_clk_pol->ival[0] : CX24116_DEFAULT_MPEG_CLK_POL;
+    return tuner_init(mpeg_clk_pol);
 }
 
 static int do_tuner_tune_cmd(int argc, char **argv)
@@ -411,6 +417,17 @@ static int do_tuner_tune_cmd(int argc, char **argv)
     return 0;
 }
 
+void tuner_reset_set(bool state)
+{
+    tuner_reset_active = state;
+    gpio_set_level(GPIO_TUNER_RESET, tuner_reset_active ? 0 : 1);
+}
+
+bool tuner_reset_get()
+{
+    return tuner_reset_active;
+}
+
 static int do_tuner_reset_cmd(int argc, char **argv)
 {
     int nerrors = arg_parse(argc, argv, (void **)&tuner_reset_cmd_args);
@@ -435,7 +452,7 @@ static int do_tuner_reset_cmd(int argc, char **argv)
     }
 
     ESP_LOGI(TAG_CX, "Setting GPIO_TUNER_RESET to %d", level);
-    gpio_set_level(GPIO_TUNER_RESET, level);
+    tuner_reset_set(level);
     ESP_LOGI(TAG_CX, "GPIO_TUNER_RESET set to %d", level);
 
     return 0;
@@ -546,8 +563,8 @@ static int do_tuner_tx_cmd(int argc, char **argv)
     }
 
     ESP_LOGI(TAG_CX, "Sending DiSEqC master command (len: %d):", cmd.msg_len);
-    for(int i=0; i< cmd.msg_len; i++) ESP_LOGI(TAG_CX, "  0x%02X", cmd.msg[i]);
-
+    for (int i = 0; i < cmd.msg_len; i++)
+        ESP_LOGI(TAG_CX, "  0x%02X", cmd.msg[i]);
 
     if (g_linux_dvb_frontend->ops.diseqc_send_master_cmd)
     {
@@ -693,14 +710,17 @@ static int do_tuner_voltage_cmd(int argc, char **argv)
 }
 
 /* Function to get current tuner status for web API */
-esp_err_t tuner_get_status_data(tuner_status_t *status_data) {
-    if (!status_data) {
+esp_err_t tuner_get_status_data(tuner_status_t *status_data)
+{
+    if (!status_data || !tuner_initialized)
+    {
         return ESP_ERR_INVALID_ARG;
     }
 
     memset(status_data, 0, sizeof(tuner_status_t));
 
-    if (!g_linux_dvb_frontend) {
+    if (!g_linux_dvb_frontend)
+    {
         ESP_LOGE(TAG_CX, "Tuner not initialized. Cannot get status.");
         status_data->initialized = false;
         return ESP_ERR_INVALID_STATE;
@@ -710,53 +730,75 @@ esp_err_t tuner_get_status_data(tuner_status_t *status_data) {
     int ret;
     enum fe_status fe_stat_val = 0; /* Temporary variable for fe_status */
 
-    if (g_linux_dvb_frontend->ops.read_status) {
+    if (g_linux_dvb_frontend->ops.read_status)
+    {
         /* Cast the address of status_data->status_flags to enum fe_status* */
         /* This assumes tuner_status_t.status_flags is compatible in size and meaning with fe_status */
         ret = g_linux_dvb_frontend->ops.read_status(g_linux_dvb_frontend, &fe_stat_val);
-        if (ret == 0) {
+        if (ret == 0)
+        {
             status_data->status_flags = (uint32_t)fe_stat_val;
-        } else {
+        }
+        else
+        {
             ESP_LOGE(TAG_CX, "Failed to read status (ret: %d)", ret);
             /* Continue to try and read other values if possible */
         }
-    } else {
+    }
+    else
+    {
         ESP_LOGW(TAG_CX, "read_status operation not available.");
     }
 
-    if (g_linux_dvb_frontend->ops.read_snr) {
+    if (g_linux_dvb_frontend->ops.read_snr)
+    {
         ret = g_linux_dvb_frontend->ops.read_snr(g_linux_dvb_frontend, &status_data->snr);
-        if (ret != 0) {
+        if (ret != 0)
+        {
             ESP_LOGE(TAG_CX, "Failed to read SNR (ret: %d)", ret);
         }
-    } else {
+    }
+    else
+    {
         ESP_LOGW(TAG_CX, "read_snr operation not available.");
     }
 
-    if (g_linux_dvb_frontend->ops.read_signal_strength) {
+    if (g_linux_dvb_frontend->ops.read_signal_strength)
+    {
         ret = g_linux_dvb_frontend->ops.read_signal_strength(g_linux_dvb_frontend, &status_data->strength);
-        if (ret != 0) {
+        if (ret != 0)
+        {
             ESP_LOGE(TAG_CX, "Failed to read signal strength (ret: %d)", ret);
         }
-    } else {
+    }
+    else
+    {
         ESP_LOGW(TAG_CX, "read_signal_strength operation not available.");
     }
 
-    if (g_linux_dvb_frontend->ops.read_ber) {
+    if (g_linux_dvb_frontend->ops.read_ber)
+    {
         ret = g_linux_dvb_frontend->ops.read_ber(g_linux_dvb_frontend, &status_data->ber);
-        if (ret != 0) {
+        if (ret != 0)
+        {
             ESP_LOGE(TAG_CX, "Failed to read BER (ret: %d)", ret);
         }
-    } else {
+    }
+    else
+    {
         ESP_LOGW(TAG_CX, "read_ber operation not available.");
     }
 
-    if (g_linux_dvb_frontend->ops.read_ucblocks) {
+    if (g_linux_dvb_frontend->ops.read_ucblocks)
+    {
         ret = g_linux_dvb_frontend->ops.read_ucblocks(g_linux_dvb_frontend, &status_data->uc_blocks);
-        if (ret != 0) {
+        if (ret != 0)
+        {
             ESP_LOGE(TAG_CX, "Failed to read uncorrected blocks (ret: %d)", ret);
         }
-    } else {
+    }
+    else
+    {
         ESP_LOGW(TAG_CX, "read_ucblocks operation not available.");
     }
 
@@ -764,12 +806,15 @@ esp_err_t tuner_get_status_data(tuner_status_t *status_data) {
 }
 
 /* Function to perform tuning based on parameters from web API */
-esp_err_t tuner_web_tune(const tuner_tune_params_t *params) {
-    if (!params) {
+esp_err_t tuner_web_tune(const tuner_tune_params_t *params)
+{
+    if (!params || !tuner_initialized)
+    {
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!g_linux_dvb_frontend) {
+    if (!g_linux_dvb_frontend)
+    {
         ESP_LOGE(TAG_CX, "Tuner not initialized. Call tuner_init first.");
         return ESP_ERR_INVALID_STATE;
     }
@@ -779,7 +824,7 @@ esp_err_t tuner_web_tune(const tuner_tune_params_t *params) {
     /* Convert kHz to Hz and kSps to Sps for the dtv_property_cache */
     c->frequency = params->freq_khz * 1000;
     c->symbol_rate = params->sr_ksps * 1000;
-    
+
     /* Directly use integer values from params for enums, assuming they match DVB API definitions */
     /* It's crucial that the values sent from the web UI correspond to valid enum values */
     c->fec_inner = (enum fe_code_rate)params->fec;
@@ -792,33 +837,37 @@ esp_err_t tuner_web_tune(const tuner_tune_params_t *params) {
     ESP_LOGI(TAG_CX, "Web Tune: Freq=%lu Hz, SR=%lu Sps, DelSys=%d, Mod=%d, FEC=%d, Inv=%d, Pilot=%d, Rolloff=%d",
              c->frequency, c->symbol_rate, c->delivery_system, c->modulation, c->fec_inner, c->inversion, c->pilot, c->rolloff);
 
-    if (g_linux_dvb_frontend->ops.tune) {
+    if (g_linux_dvb_frontend->ops.tune)
+    {
         unsigned int delay_ticks = 0;
         enum fe_status status_val = 0;
 
         ESP_LOGI(TAG_CX, "Calling frontend ops.tune via web request...");
         int ret = g_linux_dvb_frontend->ops.tune(g_linux_dvb_frontend, true, 0, &delay_ticks, &status_val);
 
-        if (ret == 0) {
+        if (ret == 0)
+        {
             ESP_LOGI(TAG_CX, "Web tuner_tune command successful. FE Status: 0x%02x. Delay: %u ticks", status_val, delay_ticks);
             return ESP_OK;
-        } else {
+        }
+        else
+        {
             ESP_LOGE(TAG_CX, "Web tuner_tune command failed (ret: %d)", ret);
             return ESP_FAIL; /* Or a more specific error code if available */
         }
-    } else {
+    }
+    else
+    {
         ESP_LOGE(TAG_CX, "Frontend tune function not available in ops table.");
         return ESP_ERR_NOT_SUPPORTED;
     }
     return ESP_FAIL; /* Should not be reached if ops.tune exists */
 }
 
-
-
-void tuner_init(void)
+void tuner_init_base(void)
 {
-    gpio_set_level(GPIO_TUNER_RESET, 0);
-    
+    tuner_reset_set(true);
+
     /* Register tuner_init command */
     tuner_init_args.mpeg_clk_pol = arg_int0("p", "clkpol", "<pol>", "MPEG Clock Polarity (default: 0x02)");
     tuner_init_args.end = arg_end(1); /* Corrected from 2 to 1 as only mpeg_clk_pol is an arg */
@@ -912,4 +961,6 @@ void tuner_init(void)
         .func = &do_tuner_voltage_cmd,
         .argtable = &tuner_voltage_cmd_args};
     ESP_ERROR_CHECK(esp_console_cmd_register(&tuner_voltage_console_cmd));
+
+    tuner_initialized = true;
 }

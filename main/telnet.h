@@ -1,4 +1,4 @@
 #pragma once
 
 
-void app_start_telnet_server(void);
+void telnet_start(void);

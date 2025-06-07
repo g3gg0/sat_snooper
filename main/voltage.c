@@ -13,6 +13,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+static voltage_t current_voltage_setting = VOLTAGE_OFF;
+
 void voltage_select(voltage_t voltage)
 {
     switch (voltage)
@@ -32,6 +34,12 @@ void voltage_select(voltage_t voltage)
         gpio_set_level(GPIO_TUNER_3V3_SW, 1);
         break;
     }
+    current_voltage_setting = voltage; /* Store the current setting */
+}
+
+voltage_t voltage_get_current(void)
+{
+    return current_voltage_setting;
 }
 
 
