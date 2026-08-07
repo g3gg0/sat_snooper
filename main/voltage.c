@@ -20,18 +20,22 @@ void voltage_select(voltage_t voltage)
     switch (voltage)
     {
     case VOLTAGE_OFF:
-        gpio_set_level(GPIO_LNB_ENABLE, 0);
-        gpio_set_level(GPIO_TUNER_3V3_SW, 0);
+        gpio_set_level(GPIO_LNB_EN_HIGH, 0);
+        gpio_set_level(GPIO_LNB_EN_18V, 0);
+        gpio_set_level(GPIO_TUNER_EN_VCC3, 0);
+        gpio_set_level(GPIO_TUNER_EN_VCORE, 0);
         break;
     case VOLTAGE_13V:
-        gpio_set_level(GPIO_LNB_13_18V, 0);
-        gpio_set_level(GPIO_LNB_ENABLE, 1);
-        gpio_set_level(GPIO_TUNER_3V3_SW, 1);
+        gpio_set_level(GPIO_LNB_EN_HIGH, 1);
+        gpio_set_level(GPIO_LNB_EN_18V, 0);
+        gpio_set_level(GPIO_TUNER_EN_VCC3, 1);
+        gpio_set_level(GPIO_TUNER_EN_VCORE, 1);
         break;
     case VOLTAGE_18V:
-        gpio_set_level(GPIO_LNB_13_18V, 1);
-        gpio_set_level(GPIO_LNB_ENABLE, 1);
-        gpio_set_level(GPIO_TUNER_3V3_SW, 1);
+        gpio_set_level(GPIO_LNB_EN_HIGH, 1);
+        gpio_set_level(GPIO_LNB_EN_18V, 1);
+        gpio_set_level(GPIO_TUNER_EN_VCC3, 1);
+        gpio_set_level(GPIO_TUNER_EN_VCORE, 1);
         break;
     }
     current_voltage_setting = voltage; /* Store the current setting */
@@ -96,11 +100,12 @@ void register_voltage_commands(void)
 
 void voltage_init()
 {
-    gpio_set_direction(GPIO_LNB_ENABLE, GPIO_MODE_OUTPUT);
-    gpio_set_direction(GPIO_LNB_13_18V, GPIO_MODE_OUTPUT);
-    gpio_set_direction(GPIO_TUNER_RESET, GPIO_MODE_OUTPUT);
-    gpio_set_direction(GPIO_TUNER_3V3_SW, GPIO_MODE_OUTPUT);
-    voltage_select(VOLTAGE_OFF);
+    gpio_set_direction(GPIO_LNB_EN_18V, GPIO_MODE_INPUT_OUTPUT);
+    gpio_set_direction(GPIO_LNB_EN_HIGH, GPIO_MODE_INPUT_OUTPUT);
+    gpio_set_direction(GPIO_TUNER_EN_VCC3, GPIO_MODE_INPUT_OUTPUT);
+    gpio_set_direction(GPIO_TUNER_EN_VCORE, GPIO_MODE_INPUT_OUTPUT);
+    gpio_set_direction(GPIO_TUNER_RESET, GPIO_MODE_INPUT_OUTPUT);
+    voltage_select(VOLTAGE_13V);
     
     register_voltage_commands();
 

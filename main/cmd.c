@@ -1,5 +1,3 @@
-
-
 #include <stdio.h>
 #include <string.h>
 #include "esp_system.h"
@@ -9,8 +7,8 @@
 #include "cmd_system.h"
 #include "cmd_wifi.h"
 #include "cmd_nvs.h"
+#include "gpio_cmd.h"
 
-static const char *TAG = "cmd";
 
 #define PROMPT_STR CONFIG_IDF_TARGET
 
@@ -58,6 +56,7 @@ void cmd_start()
     register_wifi();
 #endif
     register_nvs();
+    register_gpio_commands();
 
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }

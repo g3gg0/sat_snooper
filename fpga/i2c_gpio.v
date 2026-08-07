@@ -60,7 +60,11 @@ module i2c_gpio
 						output       Enable,
 						input[7:0]  Status,
 						input        RST_N,
-						input        CLK);
+						input        CLK,
+						input[31:0]  fpga_clock_cycles
+                        
+                        
+                        );
 	  
 	  
  /***********************************************************************
@@ -86,6 +90,9 @@ wire       wb_ack_o ;
  
  
 reg [7:0] data0;
+reg [7:0] data1;
+reg [7:0] data2;
+reg [7:0] data3;
 reg [7:0] temp0,temp1,temp2,temp3;
 reg [7:0] n_temp0,n_temp1,n_temp2,n_temp3;
 reg       Enable   ;
@@ -179,11 +186,21 @@ always @ (posedge CLK or negedge RST_N)
   begin 
     if(!RST_N) begin 
         data0 <= 8'h00000000;
+        data1 <= 8'h00000000;
+        data2 <= 8'h00000000;
+        data3 <= 8'h00000000;
     end
    // Add your logic here for data[0-7] registers
     else begin 
 		case(i2c_cmd)
-			`Status_Read: 		data0 <= Status     ; // Read GPIO Input 
+			`Status_Read: 		data0 <= Status; // Read GPIO Input 
+			`FPGA_CLK_Read:  	
+            begin 
+                data3 <= fpga_clock_cycles[7:0]; 
+                data2 <= fpga_clock_cycles[15:8];
+                data1 <= fpga_clock_cycles[23:16];
+                data0 <= fpga_clock_cycles[31:24];
+            end 
 			default:			data0 <= data0;
 		endcase
 	end   
@@ -195,21 +212,13 @@ always @ (posedge CLK or negedge RST_N)
       begin 
         temp0 <= 8'h00 ;
         temp1 <= 8'h00 ;
-        temp2 <= 8'h00 ;
-		temp3 <= 8'h00 ;
       end
     else begin 
         temp0 <= n_temp0 ;
-        temp1 <= n_temp1 ;
-        temp2 <= n_temp2 ;
-	    temp3 <= n_temp3 ;	 
+        temp1 <= n_temp1 ; 
     end
    end   
   
- 
-
-
-
 
 always @ (posedge CLK or negedge RST_N)
   begin 
@@ -230,10 +239,12 @@ always @ (posedge CLK or negedge RST_N)
 /////////////////////////////////////////////   
  
 wire enable_command    = ((temp1 == `ENABLE) || (temp1 == `DISABLE));
-												  
+wire wide_read_command = (temp1 == `FPGA_CLK_Read);												  
 
 wire status_command      = (temp1 == `Status_Read);
-wire cmd_data =  (enable_command | status_command);					 
+wire cmd_data =  (enable_command | status_command | wide_read_command);	
+
+wire read_command = (i2c_cmd == `Status_Read) || (i2c_cmd == `FPGA_CLK_Read);
     
 /***********************************************************************
  *                                                                     *
@@ -482,10 +493,15 @@ always @ ( * )
           n_count_en = `LOW ;
 		  if(enable_command)                                           // Enable command
 		   n_state = `state17;	
-          else if (status_command)                                  // Interrupt Read command
+          else if (read_command)
 		   n_state = `state12;
 		  else                                                         // Error commands
-           n_state = `state17;		  
+           n_state = `state17;		
+
+          if(wide_read_command)
+            n_dat_count = 4; 
+          else
+            n_dat_count = 1;   
        end
        else begin
        n_efb_flag = `HIGH ;
@@ -498,53 +514,6 @@ always @ ( * )
      end
  
  
-  `state10: begin // Command Valid        
-      if (wb_ack_o && efb_flag) begin
-          n_wb_dat_i = `ALL_ZERO ;
-          n_wb_adr_i = `ALL_ZERO ;
-          n_wb_we_i =  `LOW ;
-          n_wb_stb_i = `LOW ;
-          n_efb_flag = `LOW ;
-          n_count_en = `LOW ;
-	   if(wb_dat_o & ( `MICO_EFB_I2C_SR_TRRDY) )
-           n_state = `state11;
-       else if (~wb_dat_o[6])
-           n_state = `state2;
-       else
-           n_state = c_state;
-       end
-       else begin
-       n_efb_flag = `HIGH ;
-       n_wb_we_i =  `READ_STATUS;
-       n_wb_adr_i = `MICO_EFB_I2C_SR;
-       n_wb_dat_i =  0 ;
-       n_wb_stb_i = `HIGH ; 
-       n_state = c_state; 
-    end
-     end
- 
- 
-  `state11: begin // Store 2nd byte Information
-      if (wb_ack_o && efb_flag) begin
-          n_wb_dat_i = `ALL_ZERO ;
-          n_wb_adr_i = `ALL_ZERO ;
-          n_wb_we_i =  `LOW ;
-          n_wb_stb_i = `LOW ;
-          n_efb_flag = `LOW ;
-          n_count_en = `LOW ;
-          n_temp2 = wb_dat_o; 
-          n_dat_count = 1 ; 	
-          n_state = `state12; // For GPIO & Memory Command 
-       end
-       else begin
-       n_efb_flag = `HIGH ;
-       n_wb_we_i =  `READ_DATA;
-       n_wb_adr_i = `MICO_EFB_I2C_RXDR;
-       n_wb_dat_i =  0 ;
-       n_wb_stb_i = `HIGH ; 
-       n_state = c_state; 
-    end
-     end
  
  
   `state12: begin // Wait for TRRDY Bit 
@@ -556,7 +525,7 @@ always @ ( * )
           n_efb_flag = `LOW ;
           n_count_en = `LOW ;
        if(wb_dat_o & ( `MICO_EFB_I2C_SR_TRRDY))
-	       if( (i2c_cmd == `Status_Read)) // If Read Commands
+	       if(read_command) // If Read Commands
             n_state = `state13;
 		   else 
 		    n_state =  `state14; // For write Commands
@@ -611,8 +580,9 @@ always @ ( * )
           n_efb_flag = `LOW ;
           n_count_en = `LOW ;
           n_temp3 = wb_dat_o;		  
-          n_state = `state19;			 
-	  n_dat_count = dat_count - 1; 
+          n_state = `state19;
+            if(dat_count != 8'h00)
+                n_dat_count = dat_count - 1 ;
        end
        else begin
        n_efb_flag = `HIGH ;
@@ -636,13 +606,20 @@ always @ ( * )
           n_efb_flag = `LOW ;
           n_count_en = `LOW ;
           n_state = `state18;
-         		  
+          if(dat_count != 8'h00)
+            n_dat_count = dat_count - 1;
        end
        else begin
        n_efb_flag = `HIGH ;
        n_wb_we_i =  `WRITE;
        n_wb_adr_i = `MICO_EFB_I2C_TXDR;
-       n_wb_dat_i = data0;
+       case(dat_count)
+        0:        n_wb_dat_i = data0;
+        1:        n_wb_dat_i = data0;
+        2:        n_wb_dat_i = data1;
+        3:        n_wb_dat_i = data2;
+        4:        n_wb_dat_i = data3;
+       endcase
        n_wb_stb_i = `HIGH ; 
        n_state = c_state; 
     end
@@ -705,7 +682,10 @@ always @ ( * )
        if (( dat_count == 8'h00))	   
             n_state = `state16;		                  // Send Nack for Any More Read Request 
        else if(wb_dat_o & (`MICO_EFB_I2C_SR_TRRDY ))
-           n_state = `state17;		             // Wait till Stop 
+           if(read_command)
+     		  n_state = `state15;                   // Send Data  
+		   else
+              n_state = `state17;		             // Wait till Stop 
        else if (~wb_dat_o[6])// If Stop go to beginning
            n_state = `state2;
        else

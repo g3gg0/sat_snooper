@@ -19,6 +19,7 @@
 /* Includes for Linux-style driver integration */
 #include "linux_adapter.h" /* For KERN_INFO, printk, etc. and potentially stubs */
 #include "cx24116_linux.h" /* For cx24116_attach, struct cx24116_config, struct dvb_frontend, struct i2c_adapter */
+#include "voltage.h"
 
 #include "gpio_config.h"
 #include "driver/gpio.h"
@@ -27,50 +28,15 @@ static const char *TAG_CX = "cx24116";
 static bool tuner_initialized = false;
 static bool tuner_reset_active = true;
 
+// Define common LO frequencies and the band switch frequency.
+#define LO_FREQ_LOW_BAND 9750
+#define LO_FREQ_HIGH_BAND 10600
+#define KU_BAND_SWITCH_FREQ 11700
+#define KU_BAND_MIN_FREQ 10700
+#define KU_BAND_MAX_FREQ 12750
+
 #define CX24116_DEFAULT_ADDRESS 0x55
-/* Default MPEG clock polarity from Linux driver */
-#define CX24116_DEFAULT_MPEG_CLK_POL 0x02
-
-/* --- Register Definitions (from cx24116-elixir.c) --- */
-#define CX24116_REG_COMMAND (0x00)  /* command args 0x00..0x1e */
-#define CX24116_REG_EXECUTE (0x1f)  /* execute command */
-#define CX24116_REG_RESET (0x20)    /* reset status > 0     */
-#define CX24116_REG_MAILBOX (0x96)  /* FW or multipurpose mailbox? */
-#define CX24116_REG_SIGNAL (0x9e)   /* signal low           */
-#define CX24116_REG_SSTATUS (0x9d)  /* signal high / status */
-#define CX24116_REG_QUALITY8 (0xa3) /* SNR MSB (for EsNo mode) / Quality for S1 */
-#define CX24116_REG_QSTATUS (0xbc)  /* LNB Ready, etc. */
-#define CX24116_REG_QUALITY0 (0xd5) /* SNR LSB (for EsNo mode) / Quality for S1 */
-#define CX24116_REG_BER0 (0xc9)
-#define CX24116_REG_BER8 (0xc8)
-#define CX24116_REG_BER16 (0xc7)
-#define CX24116_REG_BER24 (0xc6)
-#define CX24116_REG_UCB0 (0xcb)
-#define CX24116_REG_UCB8 (0xca)
-#define CX24116_REG_CLKDIV (0xf3)
-#define CX24116_REG_RATEDIV (0xf9)
-#define CX24116_REG_ID_MSB (0xFF) /* Device ID MSB */
-#define CX24116_REG_ID_LSB (0xFE) /* Device ID LSB */
-
-/* --- Command Definitions (from cx24116-elixir.c) --- */
-enum cx24116_cmds
-{
-    CMD_SET_VCO = 0x10,
-    CMD_TUNEREQUEST = 0x11,
-    CMD_MPEGCONFIG = 0x13,
-    CMD_TUNERINIT = 0x14,
-    CMD_BANDWIDTH = 0x15,
-    CMD_GETAGC = 0x19,
-    CMD_LNBCONFIG = 0x20,
-    CMD_LNBSEND = 0x21, /* Formerly CMD_SEND_DISEQC */
-    CMD_LNBDCLEVEL = 0x22,
-    CMD_SET_TONE = 0x23,
-    CMD_UPDFWVERS = 0x35,
-    CMD_TUNERSLEEP = 0x36,
-    CMD_AGCCONTROL = 0x3b, /* Unknown */
-};
-
-#define CX24116_ARGLEN (0x1e)
+#define CX24116_DEFAULT_MPEG_CLK_POL 0x00
 
 /* --- Variables for Linux-style driver integration --- */
 static struct dvb_frontend *g_linux_dvb_frontend = NULL;
@@ -82,17 +48,10 @@ static struct cx24116_config g_linux_cx24116_config;
  */
 static struct i2c_adapter g_linux_i2c_adapter_dummy;
 
-/* Arguments for tuner_init command */
-static struct
-{
-    struct arg_int *mpeg_clk_pol;
-    struct arg_end *end;
-} tuner_init_args;
-
 /* Arguments for tuner_tune command */
 static struct
 {
-    struct arg_int *freq_khz;
+    struct arg_int *freq_mhz;
     struct arg_int *sr_sps;
     struct arg_int *fec;
     struct arg_int *inv;
@@ -144,11 +103,70 @@ static struct
     struct arg_end *end;
 } tuner_voltage_cmd_args;
 
+/**
+ * @brief Converts a Ku-band frequency to an L-band frequency, auto-selecting the LO.
+ *
+ * This function simulates a Universal LNB by automatically selecting the correct
+ * Local Oscillator (LO) frequency based on the Ku-band frequency.
+ * - For Ku-band frequencies < 11700 MHz, it uses the 9750 MHz LO.
+ * - For Ku-band frequencies >= 11700 MHz, it uses the 10600 MHz LO.
+ * The calculated L-band frequency is returned via a pointer.
+ *
+ * @param ku_band_freq_mhz The incoming Ku-band frequency in Megahertz (MHz).
+ * The valid range is typically 10700 MHz to 12750 MHz.
+ * @param l_band_freq_mhz_out Pointer to a uint32_t variable where the calculated
+ * L-band frequency in MHz will be stored.
+ *
+ * @return Returns 'true' if the high-band LO (10600 MHz) was used.
+ * Returns 'false' if the low-band LO was used or if an error occurred.
+ */
+bool convert_ku_to_l_band(uint32_t ku_band_freq_mhz, uint32_t *l_band_freq_mhz_out)
+{
+    // --- Input Validation ---
+    if (l_band_freq_mhz_out == NULL)
+    {
+        return false;
+    }
+
+    // Initialize the output to a safe value.
+    *l_band_freq_mhz_out = 0;
+
+    // Check if the Ku frequency is within the expected range.
+    if (ku_band_freq_mhz < KU_BAND_MIN_FREQ || ku_band_freq_mhz > KU_BAND_MAX_FREQ)
+    {
+        return false;
+    }
+
+    // --- LO Selection and Conversion Logic ---
+    uint32_t lo_freq_mhz;
+    bool is_high_band;
+
+    if (ku_band_freq_mhz >= KU_BAND_SWITCH_FREQ)
+    {
+        // High-band frequency
+        lo_freq_mhz = LO_FREQ_HIGH_BAND;
+        is_high_band = true;
+    }
+    else
+    {
+        // Low-band frequency
+        lo_freq_mhz = LO_FREQ_LOW_BAND;
+        is_high_band = false;
+    }
+
+    // The L-band frequency is the absolute difference.
+    // In a universal LNB, the Ku frequency is always higher than the selected LO.
+    *l_band_freq_mhz_out = ku_band_freq_mhz - lo_freq_mhz;
+
+    // Return whether the high-band LO was used.
+    return is_high_band;
+}
+
 int tuner_reset(struct dvb_frontend *fe)
 {
-    gpio_set_level(GPIO_TUNER_RESET, 0);
+    tuner_reset_set(true);
     vTaskDelay(pdMS_TO_TICKS(20));
-    gpio_set_level(GPIO_TUNER_RESET, 1);
+    tuner_reset_set(false);
 
     return 0;
 }
@@ -272,19 +290,16 @@ static int do_tuner_status_cmd(int argc, char **argv)
     return 0;
 }
 
-int tuner_init(uint8_t mpeg_clk_pol)
+int tuner_init()
 {
-    if(tuner_reset_get())
-    {
-        return -1;
-    }
+    tuner_reset_set(false);
+
     ESP_LOGI(TAG_CX, "Initializing tuner with Linux driver logic...");
-    ESP_LOGI(TAG_CX, "I2C Addr: 0x%02X, MPEG Clk Pol: 0x%02X",
-             CX24116_DEFAULT_ADDRESS, mpeg_clk_pol);
+    ESP_LOGI(TAG_CX, "I2C Addr: 0x%02X", CX24116_DEFAULT_ADDRESS);
 
     /* Populate the global config for the Linux driver */
     g_linux_cx24116_config.demod_address = CX24116_DEFAULT_ADDRESS;
-    g_linux_cx24116_config.mpg_clk_pos_pol = mpeg_clk_pol;
+    g_linux_cx24116_config.mpg_clk_pos_pol = CX24116_DEFAULT_MPEG_CLK_POL;
     g_linux_cx24116_config.i2c_wr_max = 128;
     g_linux_cx24116_config.reset_device = &tuner_reset;
     g_linux_cx24116_config.set_ts_params = NULL;
@@ -343,15 +358,7 @@ int tuner_init(uint8_t mpeg_clk_pol)
 
 static int do_tuner_init_cmd(int argc, char **argv)
 {
-    int nerrors = arg_parse(argc, argv, (void **)&tuner_init_args);
-    if (nerrors != 0)
-    {
-        arg_print_errors(stderr, tuner_init_args.end, argv[0]);
-        return 1;
-    }
-
-    uint8_t mpeg_clk_pol = tuner_init_args.mpeg_clk_pol->count > 0 ? tuner_init_args.mpeg_clk_pol->ival[0] : CX24116_DEFAULT_MPEG_CLK_POL;
-    return tuner_init(mpeg_clk_pol);
+    return tuner_init();
 }
 
 static int do_tuner_tune_cmd(int argc, char **argv)
@@ -371,7 +378,12 @@ static int do_tuner_tune_cmd(int argc, char **argv)
 
     struct dtv_frontend_properties *c = &g_linux_dvb_frontend->dtv_property_cache;
 
-    c->frequency = tuner_tune_cmd_args.freq_khz->ival[0] * 1000;
+    uint32_t freq = 0;
+    bool high_band = convert_ku_to_l_band(tuner_tune_cmd_args.freq_mhz->ival[0], &freq);
+
+    /* https://www.linuxtv.org/downloads/v4l-dvb-internals/device-drivers/API-struct-dtv-frontend-properties.html */
+    c->frequency = freq * 1000;
+    c->sectone = high_band ? SEC_TONE_ON : SEC_TONE_OFF;
     c->symbol_rate = tuner_tune_cmd_args.sr_sps->ival[0] * 1000;
     c->fec_inner = (enum fe_code_rate)tuner_tune_cmd_args.fec->ival[0];
     c->inversion = (enum fe_spectral_inversion)tuner_tune_cmd_args.inv->ival[0];
@@ -381,7 +393,7 @@ static int do_tuner_tune_cmd(int argc, char **argv)
     c->rolloff = (enum fe_rolloff)tuner_tune_cmd_args.rolloff->ival[0];
     /* Other dtv_frontend_properties like bandwidth_hz might be set by the driver or need defaults */
 
-    ESP_LOGI(TAG_CX, "Populating DTV properties: Freq=%lu Hz, SR=%lu Sps, DelSys=%d, Mod=%d, FEC=%d, Inv=%d, Pilot=%d, Rolloff=%d",
+    ESP_LOGI(TAG_CX, "Populating DTV properties: Freq=%lu kHz, SR=%lu Sps, DelSys=%d, Mod=%d, FEC=%d, Inv=%d, Pilot=%d, Rolloff=%d",
              c->frequency, c->symbol_rate, c->delivery_system, c->modulation, c->fec_inner, c->inversion, c->pilot, c->rolloff);
 
     if (g_linux_dvb_frontend->ops.tune)
@@ -819,10 +831,16 @@ esp_err_t tuner_web_tune(const tuner_tune_params_t *params)
         return ESP_ERR_INVALID_STATE;
     }
 
+    voltage_select(params->pol ? VOLTAGE_18V : VOLTAGE_13V);
+
     struct dtv_frontend_properties *c = &g_linux_dvb_frontend->dtv_property_cache;
 
-    /* Convert kHz to Hz and kSps to Sps for the dtv_property_cache */
-    c->frequency = params->freq_khz * 1000;
+    uint32_t freq = 0;
+    bool high_band = convert_ku_to_l_band(params->freq_mhz, &freq);
+
+    /* Convert MHz to kHz and kSps to Sps for the dtv_property_cache */
+    c->frequency = freq * 1000;
+    c->sectone = high_band ? SEC_TONE_ON : SEC_TONE_OFF;
     c->symbol_rate = params->sr_ksps * 1000;
 
     /* Directly use integer values from params for enums, assuming they match DVB API definitions */
@@ -834,8 +852,18 @@ esp_err_t tuner_web_tune(const tuner_tune_params_t *params)
     c->pilot = (enum fe_pilot)params->pilot;
     c->rolloff = (enum fe_rolloff)params->rolloff;
 
-    ESP_LOGI(TAG_CX, "Web Tune: Freq=%lu Hz, SR=%lu Sps, DelSys=%d, Mod=%d, FEC=%d, Inv=%d, Pilot=%d, Rolloff=%d",
-             c->frequency, c->symbol_rate, c->delivery_system, c->modulation, c->fec_inner, c->inversion, c->pilot, c->rolloff);
+    ESP_LOGI(TAG_CX, "Web Tune: Input_Ku=%lu MHz, Freq_L=%lu kHz, %s, SR=%lu Sps, DelSys=%d, Mod=%d, FEC=%d, Inv=%d, Pilot=%d, Rolloff=%d, sectone=%d",
+             params->freq_mhz, c->frequency, high_band ? "HI" : "LO", c->symbol_rate, c->delivery_system, c->modulation, c->fec_inner, c->inversion, c->pilot, c->rolloff, c->sectone);
+
+    if (g_linux_dvb_frontend->ops.set_tone)
+    {
+        int ret = g_linux_dvb_frontend->ops.set_tone(g_linux_dvb_frontend, c->sectone);
+        if (ret != 0)
+        {
+            ESP_LOGE(TAG_CX, "Failed to set tuner tone (ret: %d).", ret);
+            return 1;
+        }
+    }
 
     if (g_linux_dvb_frontend->ops.tune)
     {
@@ -869,18 +897,15 @@ void tuner_init_base(void)
     tuner_reset_set(true);
 
     /* Register tuner_init command */
-    tuner_init_args.mpeg_clk_pol = arg_int0("p", "clkpol", "<pol>", "MPEG Clock Polarity (default: 0x02)");
-    tuner_init_args.end = arg_end(1); /* Corrected from 2 to 1 as only mpeg_clk_pol is an arg */
     const esp_console_cmd_t tuner_init_cmd = {
         .command = "tuner_init",
         .help = "Initialize CX24116 tuner using Linux driver logic and load firmware.",
         .hint = NULL,
-        .func = &do_tuner_init_cmd,
-        .argtable = &tuner_init_args};
+        .func = &do_tuner_init_cmd};
     ESP_ERROR_CHECK(esp_console_cmd_register(&tuner_init_cmd));
 
     /* Register tuner_tune command */
-    tuner_tune_cmd_args.freq_khz = arg_int1("f", "freq", "<kHz>", "Frequency in kHz");
+    tuner_tune_cmd_args.freq_mhz = arg_int1("f", "freq", "<MHz>", "Frequency in MHz");
     tuner_tune_cmd_args.sr_sps = arg_int1("s", "sr", "<Sps>", "Symbol Rate in Sps");
     tuner_tune_cmd_args.fec = arg_int1(NULL, "fec", "<val>", "FEC (see DVB API fe_code_rate)");
     tuner_tune_cmd_args.inv = arg_int1(NULL, "inv", "<val>", "Inversion (see DVB API fe_spectral_inversion)");

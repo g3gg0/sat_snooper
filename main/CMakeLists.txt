@@ -1,14 +1,15 @@
-set(COMPONENT_PRIV_REQUIRES esp_peripherals)
-
 idf_component_register(
     SRCS
+    "led.c"
     "web.c"
     "main.c"
     "voltage.c"
+    "i2s.c"
     "i2c.c"
     "fpga.c"
     "wifi.c"
     "cmd.c"
+    "gpio_cmd.c"
     "telnet.c"
     "tuner/tuner.c"
     "tuner/cx24116_linux.c"
@@ -18,4 +19,5 @@ idf_component_register(
     "."
     "tuner"
 
-    PRIV_REQUIRES fatfs esp_psram esp_wifi wpa_supplicant esp_event nvs_flash esp_http_server json)
+    EMBED_FILES "favicon.ico"
+    PRIV_REQUIRES fatfs driver esp_driver_gpio esp_hw_support esp_psram esp_wifi wpa_supplicant esp_event nvs_flash esp_http_server json )

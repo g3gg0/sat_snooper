@@ -123,6 +123,9 @@
  `define DISABLE				8'h04
  `define Status_Read            8'h02
  
+ `define FPGA_CLK_Read            8'h07
+ `define Tuner_CLK_Read           8'h08
+ `define Tuner_Valid_CLK_Read     8'h09
  
  
 /***********************************************************************

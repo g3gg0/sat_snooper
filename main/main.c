@@ -20,11 +20,13 @@
 #include "tuner.h"
 #include "voltage.h"
 #include "i2c.h"
+#include "i2s.h"
 #include "fpga.h"
 #include "wifi.h"
 #include "telnet.h"
 #include "web.h"
 #include "cmd.h"
+#include "led.h"
 
 
 static const char *TAG = "satsnooper";
@@ -33,6 +35,9 @@ static const char *TAG = "satsnooper";
 
 void app_main(void)
 {
+    led_init();
+    led_set_color(32, 0, 0);
+
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_init());
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_loop_create_default());
 
@@ -55,13 +60,18 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to mount FAT image in 'storage' partition (%s)", esp_err_to_name(err));
     }
 
+    led_set_color(32, 32, 0);
+    
     voltage_init();
     i2c_init();
     fpga_init();
+    i2s_init();
     tuner_init_base();
 
     wifi_start();
     telnet_start();
     web_start();
     cmd_start();
+
+    led_set_color(0, 32, 0);
 }

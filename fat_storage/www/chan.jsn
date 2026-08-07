@@ -1,0 +1,44 @@
+[
+  {
+    "displayName": "10847 V (DVB-S QPSK 5/6)",
+    "polarization": "V",
+    "freqMHz": 10847,
+    "tuneParams": { "s": 22000, "inv": 0, "delsys": 5, "mod": 0, "pilot": 0, "fec": 5, "rolloff": 0 }
+  },
+  {
+    "displayName": "11671 H (DVB-S2 QPSK 2/3)",
+    "polarization": "H",
+    "freqMHz": 11671,
+    "tuneParams": { "s": 22000, "inv": 0, "delsys": 6, "mod": 9, "pilot": 2, "fec": 2, "rolloff": 0 }
+  },
+  {
+    "displayName": "10758 V (DVB-S2 8PSK 2/3)",
+    "polarization": "V",
+    "freqMHz": 10758,
+    "tuneParams": { "s": 22000, "inv": 0, "delsys": 6, "mod": 9, "pilot": 2, "fec": 2, "rolloff": 0 }
+  },
+  {
+    "displayName": "10995 H (DVB-S2 8PSK 5/6)",
+    "polarization": "H",
+    "freqMHz": 10995,
+    "tuneParams": { "s": 22000, "inv": 0, "delsys": 6, "mod": 9, "pilot": 2, "fec": 5, "rolloff": 0 }
+  },
+  {
+    "displayName": "12669 V (DVB-S2 8PSK 3/4 R0.25)",
+    "polarization": "V",
+    "freqMHz": 12669,
+    "tuneParams": { "s": 23500, "inv": 2, "delsys": 6, "mod": 9, "pilot": 2, "fec": 3, "rolloff": 2 }
+  },
+  {
+    "displayName": "11229 V (DVB-S2 8PSK 2/3 R0.20)",
+    "polarization": "V",
+    "freqMHz": 11229,
+    "tuneParams": { "s": 22000, "inv": 2, "delsys": 6, "mod": 9, "pilot": 2, "fec": 2, "rolloff": 1 }
+  },
+  {
+    "displayName": "11362 H (DVB-S2 8PSK 2/3)",
+    "polarization": "H",
+    "freqMHz": 11362,
+    "tuneParams": { "s": 22000, "inv": 2, "delsys": 6, "mod": 9, "pilot": 2, "fec": 2, "rolloff": 0 }
+  }
+]

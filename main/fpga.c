@@ -2,7 +2,9 @@
 #include <stdlib.h> /* For atoi */
 
 #include "driver/gpio.h"
+#include "driver/ledc.h" /* Added for LEDC clock output functionality */
 
+#include "esp_clock_output.h"
 #include "esp_log.h"
 #include "esp_console.h"
 
@@ -20,6 +22,7 @@
 
 /* Define the expected FPGA ID as a uint32_t */
 #define LCMXO2_256HC_QFN32_ID 0x012B8043
+#define LCMXO2_1200HC_QFN32_ID 0x012BA043
 /* https://bsdl.info/details.htm?sid=1667b5d760b4fa6288ca59b002289d77 */
 
 #define BITSTREAM_BLOCK_SIZE 128
@@ -30,19 +33,32 @@
 
 static const char *TAG = "FPGA";
 
-int fpga_bitstream_dl_data(const uint8_t *data, size_t length)
+static bool fpga_prog_active = false;
+
+void fpga_prog(bool active)
+{
+    gpio_set_level(GPIO_FPGA_PROGRAMN, active ? 0 : 1);
+    fpga_prog_active = active;
+}
+
+bool fpga_prog_get()
+{
+    return fpga_prog_active;
+}
+
+int fpga_dl_data(const uint8_t *data, size_t length)
 {
     ESP_LOGI(TAG, "Starting bitstream download from data buffer (%d bytes)...", length);
     int ret = 0;
 
-    gpio_set_level(GPIO_FPGA_PROGRAMN, 0);
+    fpga_prog(true);
 
     /* Enter programming mode */
     uint8_t cmd_refresh[] = {FPGA_CMD_REFRESH, 0x00, 0x00};
     if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd_refresh, sizeof(cmd_refresh)) != 0)
     {
         ESP_LOGE(TAG, "FPGA_CMD_REFRESH failed");
-        gpio_set_level(GPIO_FPGA_PROGRAMN, 1);
+        fpga_prog(false);
         return 1;
     }
 
@@ -50,32 +66,32 @@ int fpga_bitstream_dl_data(const uint8_t *data, size_t length)
     if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd_enable_offline, sizeof(cmd_enable_offline)) != 0)
     {
         ESP_LOGE(TAG, "FPGA_CMD_ENABLE_CFG_IF_OFFLINE failed");
-        gpio_set_level(GPIO_FPGA_PROGRAMN, 1);
+        fpga_prog(false);
         return 1;
     }
 
-    uint8_t cmd_erase[] = {FPGA_CMD_ERASE, 0x07, 0x00}; /* 0x0100: SRAM, 0x0200: UFM, 0x0400: Feature Row, 0x0000: CFG Flash */
-                                                        /* Using 0x07 to match previous erase logic if it implied SRAM + UFM + Feature */
-                                                        /* For SRAM only programming, typically 0x01 is used for ERASE_SRAM. */
-                                                        /* The original fpga_bitstream_dl used 0x07. Let's assume it means erase relevant config flash sectors. */
-                                                        /* For programming SRAM directly, ERASE_SRAM (0x01) is more typical. */
-    cmd_erase[1] = ERASE_SRAM;                          /* Corrected to ERASE_SRAM for typical bitstream loading to SRAM */
+    uint8_t cmd_erase[] = {FPGA_CMD_ERASE, 0x00, 0x00, 0x00}; /* 0x0100: SRAM, 0x0200: UFM, 0x0400: Feature Row, 0x0000: CFG Flash */
+                                                              /* Using 0x07 to match previous erase logic if it implied SRAM + UFM + Feature */
+                                                              /* For SRAM only programming, typically 0x01 is used for ERASE_SRAM. */
+                                                              /* The original fpga_dl_file used 0x07. Let's assume it means erase relevant config flash sectors. */
+                                                              /* For programming SRAM directly, ERASE_SRAM (0x01) is more typical. */
+    cmd_erase[1] = ERASE_SRAM;                                /* Corrected to ERASE_SRAM for typical bitstream loading to SRAM */
 
     if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd_erase, sizeof(cmd_erase)) != 0)
     {
         ESP_LOGE(TAG, "FPGA_CMD_ERASE (SRAM) failed");
-        gpio_set_level(GPIO_FPGA_PROGRAMN, 1);
+        fpga_prog(false);
         return 1;
     }
     ESP_LOGI(TAG, "FPGA SRAM erase command sent.");
     // Add delay or status check for erase completion if necessary, though often not for SRAM.
     vTaskDelay(pdMS_TO_TICKS(100)); // Small delay after erase
 
-    uint8_t burst_command[] = {FPGA_CMD_LSC_BITSTREAM_BURST, 0x00, 0x00, 0x00, 0x00};
+    uint8_t burst_command[] = {FPGA_CMD_LSC_BITSTREAM_BURST, 0x00, 0x00, 0x00};
     if (i2c_write_partial(FPGA_ADDR_CONF_PRIMARY, burst_command, sizeof(burst_command), false) != 0)
     {
         ESP_LOGE(TAG, "Failed to write bitstream burst command");
-        gpio_set_level(GPIO_FPGA_PROGRAMN, 1);
+        fpga_prog(false);
         return 1;
     }
     ESP_LOGI(TAG, "FPGA bitstream burst command sent.");
@@ -130,7 +146,7 @@ int fpga_bitstream_dl_data(const uint8_t *data, size_t length)
         // ret = 1; // This might be non-critical if programming already succeeded.
     }
 
-    gpio_set_level(GPIO_FPGA_PROGRAMN, 1);
+    fpga_prog(false);
     if (ret == 0)
     {
         ESP_LOGI(TAG, "FPGA programming from data buffer successful.");
@@ -142,10 +158,9 @@ int fpga_bitstream_dl_data(const uint8_t *data, size_t length)
     return ret;
 }
 
-int fpga_bitstream_dl(const char *file)
+int fpga_dl_file(const char *file)
 {
-    int ret = 0;
-
+    ESP_LOGI(TAG, "Attempting to load bitstream file: %s into RAM", file);
     FILE *fp = fopen(file, "rb");
     if (!fp)
     {
@@ -153,80 +168,187 @@ int fpga_bitstream_dl(const char *file)
         return 1;
     }
 
-    /* Enter programming mode */
-    uint8_t cmd_refresh[] = {FPGA_CMD_REFRESH, 0x00, 0x00};
-    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd_refresh, sizeof(cmd_refresh)) != 0)
+    fseek(fp, 0, SEEK_END);
+    long length = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    if (length <= 0)
     {
-        ESP_LOGE(TAG, "FPGA_CMD_REFRESH failed");
+        ESP_LOGE(TAG, "Bitstream file is empty or invalid size: %s", file);
         fclose(fp);
         return 1;
     }
 
-    uint8_t cmd_enable_offline[] = {FPGA_CMD_ENABLE_CFG_IF_OFFLINE, 0x00, 0x00};
-    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd_enable_offline, sizeof(cmd_enable_offline)) != 0)
+    uint8_t *bitstream_data = (uint8_t *)malloc(length);
+    if (!bitstream_data)
     {
-        ESP_LOGE(TAG, "FPGA_CMD_ENABLE_CFG_IF_OFFLINE failed");
+        ESP_LOGE(TAG, "Failed to allocate memory for bitstream data (%ld bytes)", length);
         fclose(fp);
         return 1;
     }
 
-    uint8_t cmd_erase[] = {FPGA_CMD_ERASE, 0x07, 0x00}; /* 0x0100: SRAM */
-    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd_erase, sizeof(cmd_erase)) != 0)
-    {
-        ESP_LOGE(TAG, "FPGA_CMD_ERASE failed");
-        fclose(fp);
-        return 1;
-    }
-
-    /* Open bitstream file */
-
-    uint8_t burst_command[] = {FPGA_CMD_LSC_BITSTREAM_BURST, 0x00, 0x00, 0x00, 0x00};
-    if (i2c_write_partial(FPGA_ADDR_CONF_PRIMARY, burst_command, sizeof(burst_command), false) != 0)
-    {
-        ESP_LOGE(TAG, "Failed to write bitstream burst command");
-        fclose(fp);
-        return 1;
-    }
-
-    /* Write bitstream in blocks */
-    uint8_t buf[BITSTREAM_BLOCK_SIZE];
-    size_t read_bytes;
-    while ((read_bytes = fread(buf, 1, BITSTREAM_BLOCK_SIZE, fp)) > 0)
-    {
-        bool end = feof(fp);
-
-        if (i2c_write_partial(FPGA_ADDR_CONF_PRIMARY, buf, read_bytes, end) != 0)
-        {
-            ESP_LOGE(TAG, "Failed to write bitstream block");
-            ret = 1;
-            break;
-        }
-    }
-
+    size_t read_bytes = fread(bitstream_data, 1, length, fp);
     fclose(fp);
 
-    if (ret)
+    if (read_bytes != length)
     {
-        return ret;
+        ESP_LOGE(TAG, "Failed to read full bitstream file into memory (read %d, expected %ld)", read_bytes, length);
+        free(bitstream_data);
+        return 1;
     }
 
-    /* Exit programming mode */
-    uint8_t cmd_disable[] = {FPGA_CMD_DISABLE_CFG_IF, 0x00, 0x00};
-    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd_disable, sizeof(cmd_disable)) != 0)
-    {
-        ESP_LOGE(TAG, "FPGA_CMD_DISABLE_CFG_IF failed");
-        ret = 1;
-    }
+    ESP_LOGI(TAG, "Successfully loaded bitstream file into RAM (%ld bytes). Calling fpga_dl_data.", length);
+    int ret = fpga_dl_data(bitstream_data, length);
 
-    uint8_t cmd_noop[] = {FPGA_CMD_BYPASS, 0xFF, 0xFF, 0xFF};
-    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd_noop, sizeof(cmd_noop)) != 0)
-    {
-        ESP_LOGE(TAG, "NO_OP failed");
-        ret = 1;
-    }
-
+    free(bitstream_data);
     return ret;
 }
+
+void fpga_clk_init(void)
+{
+    ESP_LOGI(TAG, "Initializing FPGA clock output on GPIO %d for 40MHz", GPIO_FPGA_CLOCK);
+    esp_clock_output_mapping_handle_t clkout_handle = NULL;
+    esp_err_t ret;
+
+    /* Attempt 1: Use CLKOUT_SIG_XTAL (Crystal oscillator) */
+    /* Assuming XTAL is 40MHz. If it is not, this will output the XTAL's actual frequency. */
+    ESP_LOGI(TAG, "Attempting to use CLKOUT_SIG_XTAL as clock source.");
+    ret = esp_clock_output_start(CLKOUT_SIG_XTAL, GPIO_FPGA_CLOCK, &clkout_handle);
+    if (ret == ESP_OK)
+    {
+        ESP_LOGI(TAG, "FPGA clock output (from XTAL) started successfully on GPIO %d.", GPIO_FPGA_CLOCK);
+        /* If CLKOUT_SIG_XTAL is precisely 40MHz, no divider is needed. */
+        /* The handle clkout_handle could be stored if we need to stop/modify the clock later. */
+        /* If XTAL is not 40MHz, and divider support is available and needed, one might call esp_clock_output_set_divider here. */
+        /* However, esp_clock_output_set_divider might not be applicable to all clock sources or SoCs. */
+        /* For simplicity, if XTAL is the target frequency, we assume it matches. */
+        return;
+    }
+    ESP_LOGW(TAG, "Failed to start FPGA clock output with CLKOUT_SIG_XTAL (%s).", esp_err_to_name(ret));
+    if (clkout_handle)
+    { /* If a previous attempt partially initialized, try to clean up */
+        esp_clock_output_stop(clkout_handle);
+        clkout_handle = NULL;
+    }
+
+    /* Attempt 2: Use CLKOUT_SIG_PLL_F80M (80MHz PLL clock) and set a divider */
+    ESP_LOGI(TAG, "Attempting to use CLKOUT_SIG_PLL_F80M as source with a divider for 40MHz.");
+    ret = esp_clock_output_start(CLKOUT_SIG_PLL_F80M, GPIO_FPGA_CLOCK, &clkout_handle);
+    if (ret == ESP_OK)
+    {
+        ESP_LOGI(TAG, "Clock output (from PLL_F80M at 80MHz) started on GPIO %d.", GPIO_FPGA_CLOCK);
+#if SOC_CLOCKOUT_SUPPORT_CHANNEL_DIVIDER
+        ESP_LOGI(TAG, "Setting divider to 2 to achieve 40MHz output.");
+        ret = esp_clock_output_set_divider(clkout_handle, 2); /* 80MHz / 2 = 40MHz */
+        if (ret == ESP_OK)
+        {
+            ESP_LOGI(TAG, "FPGA clock output (40MHz from PLL_F80M) configured successfully on GPIO %d.", GPIO_FPGA_CLOCK);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to set clock divider for PLL_F80M: %s. Stopping clock output.", esp_err_to_name(ret));
+            esp_clock_output_stop(clkout_handle);
+            clkout_handle = NULL; /* Mark handle as invalid */
+        }
+#else
+        ESP_LOGW(TAG, "Clock divider setting is not supported for this configuration. Output will be 80MHz from PLL_F80M.");
+        /* If 80MHz is not acceptable, this path is problematic. Consider stopping: esp_clock_output_stop(clkout_handle); clkout_handle = NULL; */
+#endif
+        if (clkout_handle)
+            return; /* Return if successfully configured or if divider not supported but output started */
+    }
+    ESP_LOGE(TAG, "Failed to start FPGA clock output with SOC_CLOCK_PLL_F80M: %s.", esp_err_to_name(ret));
+    if (clkout_handle)
+    { /* Clean up if needed from a failed start */
+        esp_clock_output_stop(clkout_handle);
+        clkout_handle = NULL;
+    }
+
+    /* Attempt 3: Use CLKOUT_SIG_PLL_F80M (160MHz PLL clock) and set a divider */
+    ESP_LOGI(TAG, "Attempting to use CLKOUT_SIG_PLL_F80M as source with a divider for 40MHz.");
+    ret = esp_clock_output_start(CLKOUT_SIG_PLL_F80M, GPIO_FPGA_CLOCK, &clkout_handle);
+    if (ret == ESP_OK)
+    {
+        ESP_LOGI(TAG, "Clock output (from PLL_F160M at 160MHz) started on GPIO %d.", GPIO_FPGA_CLOCK);
+#if SOC_CLOCKOUT_SUPPORT_CHANNEL_DIVIDER
+        ESP_LOGI(TAG, "Setting divider to 4 to achieve 40MHz output.");
+        ret = esp_clock_output_set_divider(clkout_handle, 4); /* 160MHz / 4 = 40MHz */
+        if (ret == ESP_OK)
+        {
+            ESP_LOGI(TAG, "FPGA clock output (40MHz from PLL_F160M) configured successfully on GPIO %d.", GPIO_FPGA_CLOCK);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to set clock divider for PLL_F160M: %s. Stopping clock output.", esp_err_to_name(ret));
+            esp_clock_output_stop(clkout_handle);
+            clkout_handle = NULL;
+        }
+#else
+        ESP_LOGW(TAG, "Clock divider setting is not supported. Output will be 160MHz from PLL_F160M.");
+#endif
+        if (clkout_handle)
+            return;
+    }
+    ESP_LOGE(TAG, "Failed to start FPGA clock output with SOC_CLOCK_PLL_F160M: %s.", esp_err_to_name(ret));
+    if (clkout_handle)
+    {
+        esp_clock_output_stop(clkout_handle);
+        clkout_handle = NULL;
+    }
+
+    ESP_LOGE(TAG, "All attempts to configure FPGA clock output failed.");
+}
+
+#ifdef GPIO_FPGA_CLOCK_OLD
+void fpga_clk_old_init(uint32_t freq)
+{
+    ESP_LOGI(TAG, "Initializing OLD FPGA clock output (10 MHz) on GPIO %d using LEDC", GPIO_FPGA_CLOCK_OLD);
+
+    /*
+     * Prepare and set configuration of timers
+     * that will be used by LED Controller
+     * For a 10MHz output with 50% duty, we can use 1-bit resolution.
+     * Max duty for 1-bit resolution is (2^1 - 1) = 1.
+     * Duty = 1 will give 50% duty cycle.
+     */
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,   /* Timer mode */
+        .duty_resolution = LEDC_TIMER_1_BIT, /* Duty resolution (1 bit for 50% duty) */
+        .timer_num = LEDC_TIMER_1,           /* Timer index (using TIMER_1 to avoid conflict if TIMER_0 is used elsewhere) */
+        .freq_hz = freq,                     /* Frequency in Hertz */
+        .clk_cfg = LEDC_AUTO_CLK             /* Auto select the source clock */
+    };
+    esp_err_t ret = ledc_timer_config(&ledc_timer);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "LEDC timer configuration failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    /*
+     * Prepare and set configuration of LEDC channels
+     * channels will be assigned timers.
+     */
+    ledc_channel_config_t ledc_channel = {
+        .gpio_num = GPIO_FPGA_CLOCK_OLD,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = LEDC_CHANNEL_1, /* LEDC channel (using CHANNEL_1) */
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = LEDC_TIMER_1, /* Timer index to use */
+        .duty = 1,                 /* Set duty to 1 for 50% with 1-bit resolution */
+        .hpoint = 0};
+    ret = ledc_channel_config(&ledc_channel);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "LEDC channel configuration failed: %s", esp_err_to_name(ret));
+        /* Optionally, try to deconfigure timer if channel config fails */
+        /* ledc_timer_rst(ledc_timer.speed_mode, ledc_timer.timer_num); */
+        return;
+    }
+
+    ESP_LOGI(TAG, "LEDC configured to output 10 MHz on GPIO %d", GPIO_FPGA_CLOCK_OLD);
+}
+#endif
 
 static void fpga_socket_listener_task(void *pvParameters)
 {
@@ -348,7 +470,7 @@ static void fpga_socket_listener_task(void *pvParameters)
         if (total_received_bytes > 0)
         {
             ESP_LOGI(TAG, "Total bytes received: %d. Programming FPGA...", total_received_bytes);
-            fpga_bitstream_dl_data(rx_buffer, total_received_bytes);
+            fpga_dl_data(rx_buffer, total_received_bytes);
         }
         else if (len < 0)
         {
@@ -448,7 +570,7 @@ static int do_fpga_prog(int argc, char **argv)
 {
     if (argc < 2)
     {
-        ESP_LOGE(TAG, "Usage: fpga_prog <0|1>");
+        ESP_LOGE(TAG, "Usage: fpga_prog <0|1> (0=inactive, 1=active)");
         return 1;
     }
 
@@ -460,8 +582,8 @@ static int do_fpga_prog(int argc, char **argv)
         return 1;
     }
 
-    ESP_LOGI(TAG, "Setting GPIO_FPGA_PROGRAMN to %d", level);
-    gpio_set_level(GPIO_FPGA_PROGRAMN, level);
+    ESP_LOGI(TAG, "Setting GPIO_FPGA_PROGRAMN to %s", level ? "active" : "inactive");
+    fpga_prog(level);
 
     return 0;
 }
@@ -498,6 +620,10 @@ static int do_fpga_id(int argc, char **argv)
     if (fpga_id == LCMXO2_256HC_QFN32_ID)
     {
         ESP_LOGI(TAG, "Detected chip type: LCMXO2 256HC QFN32");
+    }
+    else if (fpga_id == LCMXO2_1200HC_QFN32_ID)
+    {
+        ESP_LOGI(TAG, "Detected chip type: LCMXO2 1200HC QFN32");
     }
     else
     {
@@ -557,13 +683,310 @@ static int do_fpga_status(int argc, char **argv)
     return 0;
 }
 
+static uint8_t fpga_exec_read_busy()
+{
+    uint8_t cmd[] = {FPGA_CMD_READ_BUSY_FLAG, 0x00, 0x00, 0x00};
+    uint8_t status_byte[1];
+
+    if (i2c_write_read(FPGA_ADDR_CONF_PRIMARY, cmd, sizeof(cmd), status_byte, sizeof(status_byte)) != 0)
+    {
+        ESP_LOGE(TAG, "Failed to write second command to FPGA");
+        return 0xFF;
+    }
+
+    return status_byte[0];
+}
+
+static uint8_t fpga_exec_wait_busy(uint32_t timeout_ms)
+{
+    TickType_t start_time = xTaskGetTickCount();
+
+    while (fpga_exec_read_busy() & 0x80)
+    {
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        if ((xTaskGetTickCount() - start_time) >= pdMS_TO_TICKS(timeout_ms))
+        {
+            return 1; /* timeout */
+        }
+    }
+
+    ESP_LOGI(TAG, "BUSY released after %" PRIu32 " ms", (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount() - start_time));
+
+    return 0; /* success */
+}
+
+static int fpga_exec_enter_offline()
+{
+    uint8_t cmd[] = {FPGA_CMD_ENABLE_CFG_IF_OFFLINE, 0x08, 0x00};
+    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd, sizeof(cmd)) != 0)
+    {
+        ESP_LOGE(TAG, "FPGA_CMD_ENABLE_CFG_IF_OFFLINE failed");
+        return 1;
+    }
+
+    return 0;
+}
+
+static int fpga_exec_exit_offline()
+{
+    uint8_t cmd[] = {FPGA_CMD_DISABLE_CFG_IF, 0x00, 0x00};
+    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd, sizeof(cmd)) != 0)
+    {
+        ESP_LOGE(TAG, "FPGA_CMD_DISABLE_CFG_IF failed");
+        return 1;
+    }
+
+    return 0;
+}
+
+static int fpga_exec_reset_cfg_address()
+{
+    uint8_t cmd[] = {FPGA_CMD_RESET_CFG_FLASH_ADDRESS, 0x00, 0x00, 0x00};
+    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd, sizeof(cmd)) != 0)
+    {
+        ESP_LOGE(TAG, "FPGA_CMD_RESET_CFG_FLASH_ADDRESS failed");
+        return 1;
+    }
+
+    return 0;
+}
+
+static int fpga_exec_erase(uint8_t type)
+{
+    uint8_t cmd[] = {FPGA_CMD_ERASE, type, 0x00, 0x00};
+
+    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd, sizeof(cmd)) != 0)
+    {
+        ESP_LOGE(TAG, "FPGA_CMD_ERASE failed");
+        return 1;
+    }
+    fpga_exec_wait_busy(10000);
+
+    return 0;
+}
+
+static int fpga_exec_program_feabits(uint16_t feabits_value)
+{
+    /* Prepare and send write FEABITS command */
+    uint8_t cmd[] = {FPGA_CMD_WRITE_FEABITS, 0x00, 0x00, 0x00, (feabits_value >> 8) & 0xFF, feabits_value & 0xFF};
+
+    ESP_LOGI(TAG, " - hex: %02X %02X %02X %02X %02X %02X", cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], cmd[5]);
+
+    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd, sizeof(cmd)) != 0)
+    {
+        ESP_LOGE(TAG, "FPGA_CMD_WRITE_FEABITS failed for value 0x%04X", feabits_value);
+        fpga_exec_exit_offline();
+        return 1;
+    }
+
+    fpga_exec_wait_busy(5000);
+    return 0;
+}
+
+static int fpga_exec_program_feature_row(uint64_t value)
+{
+    /* Prepare and send write 64 bits FEATURE_ROW command */
+    uint8_t cmd[] = {
+        FPGA_CMD_WRITE_FEATURE_ROW, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        (uint8_t)(value >> 56), (uint8_t)(value >> 48), (uint8_t)(value >> 40), (uint8_t)(value >> 32),
+        (uint8_t)(value >> 24), (uint8_t)(value >> 16), (uint8_t)(value >> 8), (uint8_t)(value & 0xFF)};
+
+    ESP_LOGI(TAG, "Programming FEATURE_ROW with value: 0x%016llX", value);
+    ESP_LOGI(TAG, "Command buffer for WRITE_FEATURE_ROW (size %u):", sizeof(cmd));
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, cmd, sizeof(cmd), ESP_LOG_INFO);
+
+    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd, sizeof(cmd)) != 0)
+    {
+        ESP_LOGE(TAG, "FPGA_CMD_WRITE_FEATURE_ROW failed for value 0x%016llX", value);
+        fpga_exec_exit_offline(); /* Assuming fpga_cmd_exit_offline() is appropriate here */
+        return 1;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(5000)); /* Delay after programming, consult datasheet for appropriate timing */
+    return 0;
+}
+
+static void fpga_dump_feabits(uint16_t feabits_data)
+{
+    const struct
+    {
+        uint16_t mask;
+        const char *name;
+    } feabit_name_map[] = {
+        {FPGA_MACHXO2_FEABITS_SECURE_PWD, "FPGA_MACHXO2_FEABITS_SECURE_PWD (Bit 0: Password protect configuration)"},
+        {FPGA_MACHXO2_FEABITS_DEC_ONLY, "FPGA_MACHXO2_FEABITS_DEC_ONLY (Bit 1: Decryption only)"},
+        {FPGA_MACHXO2_FEABITS_PWD_ENABLE, "FPGA_MACHXO2_FEABITS_PWD_ENABLE (Bit 2: Password enable for feature bits)"},
+        {FPGA_MACHXO2_FEABITS_PWD_ENABLE_ALL, "FPGA_MACHXO2_FEABITS_PWD_ENABLE_ALL (Bit 3: Password enable for all non-volatile memory)"},
+        {FPGA_MACHXO2_FEABITS_MY_ASSP_ENABLE, "FPGA_MACHXO2_FEABITS_MY_ASSP_ENABLE (Bit 4: Enable MyASSP)"},
+        {FPGA_MACHXO2_FEABITS_PRG_PERSIST_DIS, "FPGA_MACHXO2_FEABITS_PRG_PERSIST_DIS (Bit 5: Disable PROGRAMN persistence)"},
+        {FPGA_MACHXO2_FEABITS_INIT_PERSIST_EN, "FPGA_MACHXO2_FEABITS_INIT_PERSIST_EN (Bit 6: Enable INITN persistence)"},
+        {FPGA_MACHXO2_FEABITS_DONE_PERSIST_EN, "FPGA_MACHXO2_FEABITS_DONE_PERSIST_EN (Bit 7: Enable DONE persistence)"},
+        {FPGA_MACHXO2_FEABITS_JTAG_PERSIST_DIS, "FPGA_MACHXO2_FEABITS_JTAG_PERSIST_DIS (Bit 8: Disable JTAG port persistence)"},
+        {FPGA_MACHXO2_FEABITS_SSP_PERSIST_DIS, "FPGA_MACHXO2_FEABITS_SSP_PERSIST_DIS (Bit 9: Disable SSPI port persistence)"},
+        {FPGA_MACHXO2_FEABITS_I2C_PERSIST_DIS, "FPGA_MACHXO2_FEABITS_I2C_PERSIST_DIS (Bit 10: Disable I2C port persistence)"},
+        {FPGA_MACHXO2_FEABITS_MSPI_PERSIST_EN, "FPGA_MACHXO2_FEABITS_MSPI_PERSIST_EN (Bit 11: Enable Master SPI port persistence)"},
+        {FPGA_MACHXO2_FEABITS_BOOTSEL0, "FPGA_MACHXO2_FEABITS_BOOTSEL0 (Bit 12: Boot Select Bit 0)"},
+        {FPGA_MACHXO2_FEABITS_BOOTSEL1, "FPGA_MACHXO2_FEABITS_BOOTSEL1 (Bit 13: Boot Select Bit 1)"},
+        {FPGA_MACHXO2_FEABITS_RES2, "FPGA_MACHXO2_FEABITS_RES2 (Bit 14: Reserved)"},
+        {FPGA_MACHXO2_FEABITS_RES1, "FPGA_MACHXO2_FEABITS_RES1 (Bit 15: Reserved)"}};
+
+    ESP_LOGI(TAG, "  FEABITS: 0x%04X", feabits_data);
+
+    bool any_set = false;
+    for (int i = 0; i < sizeof(feabit_name_map) / sizeof(feabit_name_map[0]); i++)
+    {
+        if ((feabits_data & feabit_name_map[i].mask) == feabit_name_map[i].mask)
+        {
+            ESP_LOGI(TAG, "    - %s", feabit_name_map[i].name);
+            any_set = true;
+        }
+    }
+    if (!any_set)
+    {
+        ESP_LOGI(TAG, "  (No specific FEABITS recognized as set or all are 0)");
+    }
+}
+
+static int fpga_exec_read_feabits(uint16_t *feabits)
+{
+    uint8_t data[2];
+    uint8_t cmd_read_feabits[] = {FPGA_CMD_READ_FEABITS, 0x00, 0x00, 0x00};
+    if (i2c_write_read(FPGA_ADDR_CONF_PRIMARY, cmd_read_feabits, sizeof(cmd_read_feabits), data, sizeof(data)) != 0)
+    {
+        ESP_LOGE(TAG, "Failed to read back FPGA FEABITS after writing.");
+        return 1;
+    }
+    *feabits = (data[0] << 8) | data[1];
+    return 0;
+}
+
+static int fpga_exec_dump_feabits()
+{
+    /* Read back and dump FEABITS for verification */
+    uint16_t feabits;
+    fpga_exec_read_feabits(&feabits);
+    fpga_dump_feabits(feabits);
+    return 0;
+}
+
+static int do_fpga_read_feature_row(int argc, char **argv)
+{
+    uint8_t feature_row_data[8]; /* Feature Row is 64 bits (8 bytes) */
+
+    /* Command to read feature row */
+    uint8_t cmd_read_feature_row[] = {FPGA_CMD_READ_FEATURE_ROW, 0x00, 0x00, 0x00};
+    if (i2c_write_read(FPGA_ADDR_CONF_PRIMARY, cmd_read_feature_row, sizeof(cmd_read_feature_row), feature_row_data, sizeof(feature_row_data)) != 0)
+    {
+        ESP_LOGE(TAG, "Failed to read FPGA Feature Row");
+        return 1;
+    }
+
+    ESP_LOGI(TAG, "FPGA Feature Row (8 bytes):");
+    char hex_buffer[8 * 3 + 1]; /* Each byte takes 2 hex chars + 1 space, plus null terminator */
+    for (int i = 0; i < sizeof(feature_row_data); i++)
+    {
+        sprintf(&hex_buffer[i * 3], "%02X ", feature_row_data[i]);
+    }
+    ESP_LOGI(TAG, "%s", hex_buffer);
+
+    return 0;
+}
+
+static int do_fpga_read_feabits(int argc, char **argv)
+{
+    fpga_exec_enter_offline();
+    fpga_exec_reset_cfg_address();
+
+    uint16_t feabits;
+    fpga_exec_read_feabits(&feabits);
+    fpga_dump_feabits(feabits);
+
+    fpga_exec_exit_offline();
+
+    return 0;
+}
+
+static int do_fpga_write_feabits(int argc, char **argv)
+{
+    if (argc < 2)
+    {
+        ESP_LOGE(TAG, "Usage: fpga_write_feabits <%d_bit_binary_value>", FPGA_FEABITS_WIDTH);
+        ESP_LOGE(TAG, "Example: fpga_write_feabits 1000000000000001");
+        return 1;
+    }
+
+    const char *binary_value_str = argv[1];
+    if (strlen(binary_value_str) != FPGA_FEABITS_WIDTH)
+    {
+        ESP_LOGE(TAG, "Invalid binary value length: %s. Must be %d bits.", binary_value_str, FPGA_FEABITS_WIDTH);
+        return 1;
+    }
+
+    uint16_t feabits_value = 0;
+    for (int i = 0; i < FPGA_FEABITS_WIDTH; i++)
+    {
+        if (binary_value_str[i] == '1')
+        {
+            feabits_value |= (1 << (FPGA_FEABITS_WIDTH - 1 - i)); /* MSB first */
+        }
+        else if (binary_value_str[i] != '0')
+        {
+            ESP_LOGE(TAG, "Invalid character in binary string: '%c' at position %d. Only '0' or '1' allowed.", binary_value_str[i], i);
+            return 1;
+        }
+    }
+
+    fpga_exec_enter_offline();
+    ESP_LOGI(TAG, "Enter offline mode...");
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_LOGI(TAG, "Reset config address...");
+    fpga_exec_reset_cfg_address();
+
+    ESP_LOGI(TAG, "FEABITS before erase...");
+    fpga_exec_dump_feabits();
+    ESP_LOGI(TAG, "Erase feature bits...");
+    fpga_exec_erase(ERASE_FLASH);
+    ESP_LOGI(TAG, "FEABITS after erase...");
+    fpga_exec_dump_feabits();
+
+    ESP_LOGI(TAG, "Reset config address...");
+    fpga_exec_reset_cfg_address();
+    ESP_LOGI(TAG, "Write feature bits...");
+    fpga_exec_program_feabits(feabits_value);
+
+    ESP_LOGI(TAG, "Finishing programming...");
+    uint8_t cmd_program_done[] = {FPGA_CMD_PROGRAM_DONE, 0x00, 0x00, 0x00};
+    if (i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd_program_done, sizeof(cmd_program_done)) != 0)
+    {
+        ESP_LOGE(TAG, "Failed to write program done");
+        /* Attempt to disable config interface even on failure */
+        uint8_t cmd_disable_fail[] = {FPGA_CMD_DISABLE_CFG_IF, 0x00, 0x00};
+        i2c_write(FPGA_ADDR_CONF_PRIMARY, cmd_disable_fail, sizeof(cmd_disable_fail));
+        return 1;
+    }
+
+    fpga_exec_wait_busy(1000);
+
+    ESP_LOGI(TAG, "Reading back FEABITS");
+    fpga_exec_dump_feabits();
+
+    fpga_exec_exit_offline();
+
+    ESP_LOGI(TAG, "FPGA configuration interface disabled.");
+
+    ESP_LOGI(TAG, "FEABITS write process completed for 0x%04X. A REFRESH (0x79) or power cycle may be needed for changes to take effect.", feabits_value);
+
+    return 0;
+}
+
 static int do_fpga_dl(int argc, char **argv)
 {
     if (argc < 2)
     {
-        return fpga_bitstream_dl("/storage/fpga.bit");
+        return fpga_dl_file("/storage/fpga.bit");
     }
-    return fpga_bitstream_dl(argv[1]);
+    return fpga_dl_file(argv[1]);
 }
 
 void register_fpga_id_command(void)
@@ -610,6 +1033,39 @@ void register_fpga_erase_command(void)
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
 }
 
+void register_fpga_read_feature_row_command(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "fpga_feature_row",
+        .help = "Read FPGA Feature Row via I2C",
+        .hint = NULL,
+        .func = &do_fpga_read_feature_row,
+        .argtable = NULL};
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
+}
+
+void register_fpga_read_feabits_command(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "fpga_feabits",
+        .help = "Read FPGA FEABITS via I2C",
+        .hint = NULL,
+        .func = &do_fpga_read_feabits,
+        .argtable = NULL};
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
+}
+
+void register_fpga_write_feabits_command(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "fpga_write_feabits",
+        .help = "Write FPGA FEABITS via I2C. Arg: <16_bit_binary_value>",
+        .hint = "1000000000000001",
+        .func = &do_fpga_write_feabits,
+        .argtable = NULL};
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
+}
+
 void register_fpga_dl_command(void)
 {
     const esp_console_cmd_t cmd = {
@@ -621,20 +1077,50 @@ void register_fpga_dl_command(void)
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
 }
 
+void fpga_ensure_febits(uint16_t expected)
+{
+    uint16_t feabits;
+    fpga_exec_enter_offline();
+    fpga_exec_reset_cfg_address();
+    fpga_exec_read_feabits(&feabits);
+    fpga_dump_feabits(feabits);
+
+    if (feabits != expected)
+    {
+        ESP_LOGW(TAG, " - do not match 0x%04" PRIx16 ", reprogramming", expected);
+        ESP_LOGI(TAG, " - Enter offline mode...");
+        fpga_exec_enter_offline();
+        fpga_exec_reset_cfg_address();
+        ESP_LOGI(TAG, " - Erase feature bits...");
+        fpga_exec_erase(ERASE_FLASH);
+        fpga_exec_reset_cfg_address();
+        ESP_LOGI(TAG, " - Write feature bits...");
+        fpga_exec_program_feabits(expected);
+        fpga_exec_exit_offline();
+        ESP_LOGI(TAG, " - Done...");
+    }
+}
+
 void fpga_init()
 {
+    ESP_LOGI(TAG, "Initializing FPGA");
     gpio_set_direction(GPIO_FPGA_PROGRAMN, GPIO_MODE_OUTPUT);
 
+    fpga_clk_init();
+    // fpga_clk_old_init(2000000);
     register_fpga_id_command();
     register_fpga_status_command();
     register_fpga_dl_command();
     register_fpga_erase_command();
-    register_fpga_prog_command(); 
+    register_fpga_prog_command();
+    register_fpga_read_feature_row_command();
+    register_fpga_read_feabits_command();
+    register_fpga_write_feabits_command();
 
-    //gpio_set_level(GPIO_FPGA_PROGRAMN, 0);
-    //do_fpga_status(0, NULL);
-    //fpga_bitstream_dl("/storage/fpga.bit");
-    //gpio_set_level(GPIO_FPGA_PROGRAMN, 1);
+    fpga_start_socket_listener();
 
-    fpga_start_socket_listener(); // Start the socket listener
+    fpga_prog(true);
+    fpga_ensure_febits(FPGA_FEABITS_DEFAULT);
+    fpga_dl_file("/storage/fpga.bit");
+    fpga_prog(false);
 }

@@ -21,8 +21,9 @@
 
 /* Structure to hold all tuning parameters for web API */
 typedef struct {
-    uint32_t freq_khz;          /* Tuner frequency in kHz */
+    uint32_t freq_mhz;          /* Tuner frequency in kHz */
     uint32_t sr_ksps;           /* Symbol rate in kilo symbols per second */
+    int32_t  pol;               /* 0 = V, 1 = H */
     int32_t  fec;               /* FEC (e.g., maps to enum fe_code_rate in tuner.c) */
     int32_t  inv;               /* Inversion (e.g., maps to enum fe_spectral_inversion in tuner.c) */
     int32_t  delsys;            /* Delivery system (e.g., maps to enum fe_delivery_system in tuner.c) */
@@ -46,7 +47,7 @@ typedef struct {
  */
 void tuner_init_base(void);
 
-int tuner_init(uint8_t mpeg_clk_pol);
+int tuner_init();
 
 /**
  * @brief Get current tuner status for web API.
