@@ -1,61 +1,61 @@
-/*  Simplified I2S transmitter
-    ----------------------------------------------------------
-     Drives BCK, WS, DAT.
-     On positive edge of stream_data_valid_in, it captures stream_data_in.
-     Transmits the 8-bit data MSB-first.
-     i2s_ws toggles after every 188 bytes are transmitted.
-*/
+/* Continuous 8-bit MSB I2S transmitter for the ESP32-S3 receiver. */
 
 module i2s_tx
 (
     input             clk,          /* master / bit clock                 */
+    input             rst_n,
 
     /* Inputs for receiving streamed data */
     input      [7:0]  stream_data_in,
     input             stream_data_valid_in,
+    output            stream_data_ready_out,
 
     /* I2S lines */
-    output            i2s_bck,
-    output reg        i2s_dat = 1'b0,
-    output reg        i2s_ws  = 1'b0  /* Initial state of WS */
+    output reg        i2s_bck,
+    output reg        i2s_dat,
+    output reg        i2s_ws
 );
 
-    assign i2s_bck = is_transmitting ? clk : 1'b0;
+    reg [7:0] shift_reg;
+    reg [2:0] bit_pos_counter;
+    reg [2:0] clock_divider;
 
-    reg [7:0] shift_reg;                     /* Holds the byte currently being transmitted */
-    reg [2:0] bit_pos_counter;               /* Counts bits from 7 down to 0 (MSB first) */
-    reg [7:0] byte_tx_counter = 8'd0;        /* Counts transmitted bytes from 0 to 187 */
-    reg       is_transmitting = 1'b0;        /* Flag: true if a byte is currently being shifted out */
+    assign stream_data_ready_out = bit_pos_counter == 3'd0 &&
+                                   clock_divider == 3'd4 && i2s_bck;
 
-    reg prev_stream_data_valid_in_ff = 1'b0; /* Flip-flop to detect posedge */
+    /* BCK is clk/5. DAT and WS change only when BCK falls. */
+    always @(negedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            shift_reg <= 8'hff;
+            bit_pos_counter <= 3'd0;
+            clock_divider <= 3'd0;
+            i2s_bck <= 1'b0;
+            i2s_dat <= 1'b1;
+            i2s_ws <= 1'b0;
+        end else begin
+            if (clock_divider == 3'd4)
+                clock_divider <= 3'd0;
+            else
+                clock_divider <= clock_divider + 1'b1;
 
-    always @(posedge clk) begin
-        prev_stream_data_valid_in_ff <= stream_data_valid_in;
-    end
-
-    wire stream_data_valid_posedge = stream_data_valid_in && !prev_stream_data_valid_in_ff;
-
-    always @(posedge clk) begin
-        if (!is_transmitting) begin
-            if (stream_data_valid_posedge) begin
-                shift_reg         <= stream_data_in;
-                is_transmitting   <= 1'b1;
-                bit_pos_counter   <= 3'd7; /* Start with MSB */
-            end
-        end else begin /* is_transmitting is true */
-            i2s_dat <= shift_reg[bit_pos_counter];
-
-            if (bit_pos_counter == 3'd0) begin /* Current bit is LSB, byte transmission finished this cycle */
-                is_transmitting <= 1'b0; /* Ready for next byte capture in the next cycle */
-
-                if (byte_tx_counter == 8'd187) begin /* 188 bytes (0-187) have been transmitted */
-                    byte_tx_counter <= 8'd0;
-                    i2s_ws          <= ~i2s_ws; /* Toggle WS after 188 bytes */
+            if (clock_divider == 3'd1) begin
+                i2s_bck <= 1'b1;
+            end else if (clock_divider == 3'd4) begin
+                i2s_bck <= 1'b0;
+                if (bit_pos_counter == 3'd0) begin
+                    bit_pos_counter <= 3'd7;
+                    i2s_ws <= ~i2s_ws;
+                    if (stream_data_valid_in) begin
+                        shift_reg <= stream_data_in;
+                        i2s_dat <= stream_data_in[7];
+                    end else begin
+                        shift_reg <= 8'hff;
+                        i2s_dat <= 1'b1;
+                    end
                 end else begin
-                    byte_tx_counter <= byte_tx_counter + 1'b1;
+                    bit_pos_counter <= bit_pos_counter - 1'b1;
+                    i2s_dat <= shift_reg[bit_pos_counter - 1'b1];
                 end
-            end else begin
-                bit_pos_counter <= bit_pos_counter - 1'b1;
             end
         end
     end

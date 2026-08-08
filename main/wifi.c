@@ -1,11 +1,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/task.h"
 #include "esp_wifi.h"
 #include "esp_log.h"
 #include "esp_wps.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
 #include "nvs.h" /* Added for NVS functions */
+#include "led.h"
 #include <string.h>
 
 
@@ -31,6 +33,20 @@ static int s_ap_creds_num = 0;
 static int s_retry_num = 0;
 static bool s_tried_nvs_creds = false; /* Flag to track if we tried connecting with NVS credentials */
 
+static void wifi_led_status_task(void *arg)
+{
+    (void)arg;
+    while (true) {
+        wifi_ap_record_t ap_info;
+        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            led_set_wifi_status(true, ap_info.rssi);
+        } else {
+            led_set_wifi_status(false, -127);
+        }
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+}
+
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
@@ -43,6 +59,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             break;
         case WIFI_EVENT_STA_DISCONNECTED:
             ESP_LOGI(TAG, "WIFI_EVENT_STA_DISCONNECTED");
+            led_set_wifi_status(false, -127);
             if (s_tried_nvs_creds) {
                 ESP_LOGI(TAG, "Connection with saved NVS credentials failed.");
                 s_tried_nvs_creds = false; /* Reset flag */
@@ -144,6 +161,13 @@ static void got_ip_event_handler(void* arg, esp_event_base_t event_base,
     ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
     ESP_LOGI(TAG, "Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
 
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        led_set_wifi_status(true, ap_info.rssi);
+    } else {
+        led_set_wifi_status(true, -127);
+    }
+
     /* Save the successful credentials to NVS */
     wifi_config_t current_config;
     esp_err_t err = esp_wifi_get_config(ESP_IF_WIFI_STA, &current_config);
@@ -194,6 +218,7 @@ void wifi_start(void)
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+    xTaskCreate(wifi_led_status_task, "wifi_led", 2048, NULL, 2, NULL);
 
     /* Attempt to load and connect with saved credentials */
     nvs_handle_t my_handle;

@@ -1,6 +1,5 @@
-/*
- * I2S slave driver for receiving 188-byte packets.
- */
+/* I2S slave driver for receiving framed data from the FPGA. */
+#include <stdio.h>
 #include <string.h>
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
@@ -12,11 +11,276 @@
 
 /* I2S peripheral number */
 #define I2S_PORT_NUM I2S_NUM_0
+#define I2S_SAMPLE_RATE_HZ 500000
 #define I2S_DMA_FRAMES_PER_BUFFER 188
 #define I2S_DMA_BUF_COUNT 4
+#define FPGA_FRAME_TYPE_STATISTICS 0
+#define FPGA_FRAME_TYPE_PID_REPORT 1
+#define FPGA_FRAME_TYPE_PAT 2
+#define FPGA_STATISTICS_PAYLOAD_SIZE 12
+#define FPGA_PID_REPORT_MAX_PAYLOAD_SIZE (1 + I2S_FPGA_MAX_PIDS * 2)
+#define FPGA_FRAME_MAX_PAYLOAD_SIZE I2S_FPGA_PAT_SIZE
+#define I2S_DIAGNOSTIC_INTERVAL_MS 1000
+#define I2S_READ_TIMEOUT_MS 250
+#define I2S_DIAGNOSTIC_SAMPLE_SIZE 16
 
 static const char *TAG = "I2S_SLAVE";
 static i2s_chan_handle_t rx_chan; /* Static handle for the I2S RX channel */
+static portMUX_TYPE statistics_lock = portMUX_INITIALIZER_UNLOCKED;
+static i2s_fpga_statistics_t fpga_statistics;
+static i2s_fpga_pid_report_t fpga_pid_report;
+static i2s_fpga_pat_t fpga_pat;
+
+typedef enum {
+    FRAME_READ_TYPE,
+    FRAME_READ_LENGTH,
+    FRAME_READ_PAYLOAD,
+} frame_parser_state_t;
+
+typedef struct {
+    frame_parser_state_t state;
+    uint8_t type;
+    uint8_t length;
+    uint8_t payload_index;
+    uint8_t payload[FPGA_FRAME_MAX_PAYLOAD_SIZE];
+} frame_parser_t;
+
+typedef struct {
+    uint32_t read_count;
+    uint32_t timeout_count;
+    uint32_t byte_count;
+    uint32_t non_idle_byte_count;
+    uint32_t zero_byte_count;
+    uint32_t length_byte_count;
+    uint32_t header_candidate_count;
+    uint32_t rejected_length_count;
+    uint32_t statistics_frame_count;
+    uint32_t pid_report_frame_count;
+    uint32_t pat_frame_count;
+    uint8_t non_idle_sample[I2S_DIAGNOSTIC_SAMPLE_SIZE];
+    uint8_t non_idle_sample_size;
+} i2s_diagnostics_t;
+
+static uint32_t read_le32(const uint8_t *data)
+{
+    return (uint32_t)data[0] |
+           ((uint32_t)data[1] << 8) |
+           ((uint32_t)data[2] << 16) |
+           ((uint32_t)data[3] << 24);
+}
+
+static void store_statistics_frame(const uint8_t *payload)
+{
+    portENTER_CRITICAL(&statistics_lock);
+    fpga_statistics.sync_count = read_le32(payload);
+    fpga_statistics.data_bytes_received = read_le32(payload + 4);
+    fpga_statistics.sync_byte_errors = read_le32(payload + 8);
+    fpga_statistics.available = true;
+    portEXIT_CRITICAL(&statistics_lock);
+}
+
+static void store_pid_report_frame(const uint8_t *payload, uint8_t length)
+{
+    uint8_t count = (length - 1) / 2;
+    char pid_line[320];
+    size_t offset = 0;
+
+    portENTER_CRITICAL(&statistics_lock);
+    fpga_pid_report.overflow = payload[0] != 0;
+    fpga_pid_report.count = count;
+    for (uint8_t index = 0; index < count; index++)
+    {
+        fpga_pid_report.pids[index] = (uint16_t)payload[1 + index * 2] |
+                                      ((uint16_t)(payload[2 + index * 2] & 0x1f) << 8);
+    }
+    fpga_pid_report.available = true;
+    portEXIT_CRITICAL(&statistics_lock);
+
+    offset += snprintf(pid_line + offset, sizeof(pid_line) - offset,
+                       "Seen PIDs%s:", payload[0] ? " (truncated)" : "");
+    for (uint8_t index = 0; index < count && offset < sizeof(pid_line); index++)
+    {
+        offset += snprintf(pid_line + offset, sizeof(pid_line) - offset,
+                           " %04x", (unsigned int)fpga_pid_report.pids[index]);
+    }
+    ESP_LOGI(TAG, "%s", pid_line);
+}
+
+static void store_pat_frame(const uint8_t *payload)
+{
+    portENTER_CRITICAL(&statistics_lock);
+    memcpy(fpga_pat.data, payload, I2S_FPGA_PAT_SIZE);
+    fpga_pat.available = true;
+    portEXIT_CRITICAL(&statistics_lock);
+}
+
+static bool frame_length_is_valid(uint8_t type, uint8_t length)
+{
+    switch (type)
+    {
+    case FPGA_FRAME_TYPE_STATISTICS:
+        return length == FPGA_STATISTICS_PAYLOAD_SIZE;
+    case FPGA_FRAME_TYPE_PID_REPORT:
+        return length >= 1 && length <= FPGA_PID_REPORT_MAX_PAYLOAD_SIZE &&
+               ((length - 1) % 2) == 0;
+    case FPGA_FRAME_TYPE_PAT:
+        return length == I2S_FPGA_PAT_SIZE;
+    default:
+        return false;
+    }
+}
+
+static void parse_frame_byte(frame_parser_t *parser, i2s_diagnostics_t *diagnostics, uint8_t byte)
+{
+    switch (parser->state)
+    {
+    case FRAME_READ_TYPE:
+        if (byte <= FPGA_FRAME_TYPE_PAT)
+        {
+            diagnostics->header_candidate_count++;
+            parser->type = byte;
+            parser->state = FRAME_READ_LENGTH;
+        }
+        break;
+    case FRAME_READ_LENGTH:
+        if (frame_length_is_valid(parser->type, byte))
+        {
+            parser->length = byte;
+            parser->payload_index = 0;
+            parser->state = FRAME_READ_PAYLOAD;
+        }
+        else
+        {
+            diagnostics->rejected_length_count++;
+            parser->state = FRAME_READ_TYPE;
+        }
+        break;
+    case FRAME_READ_PAYLOAD:
+        parser->payload[parser->payload_index] = byte;
+        parser->payload_index++;
+        if (parser->payload_index == parser->length)
+        {
+            switch (parser->type)
+            {
+            case FPGA_FRAME_TYPE_STATISTICS:
+                store_statistics_frame(parser->payload);
+                diagnostics->statistics_frame_count++;
+                break;
+            case FPGA_FRAME_TYPE_PID_REPORT:
+                store_pid_report_frame(parser->payload, parser->length);
+                diagnostics->pid_report_frame_count++;
+                break;
+            case FPGA_FRAME_TYPE_PAT:
+                store_pat_frame(parser->payload);
+                diagnostics->pat_frame_count++;
+                ESP_LOGI(TAG, "Received PAT packet");
+                break;
+            }
+            parser->state = FRAME_READ_TYPE;
+        }
+        break;
+    }
+}
+
+static void record_diagnostic_byte(i2s_diagnostics_t *diagnostics, uint8_t byte)
+{
+    diagnostics->byte_count++;
+    if (byte == 0xff)
+    {
+        return;
+    }
+
+    diagnostics->non_idle_byte_count++;
+    if (byte == FPGA_FRAME_TYPE_STATISTICS)
+    {
+        diagnostics->zero_byte_count++;
+    }
+    if (byte == FPGA_STATISTICS_PAYLOAD_SIZE)
+    {
+        diagnostics->length_byte_count++;
+    }
+    if (diagnostics->non_idle_sample_size < I2S_DIAGNOSTIC_SAMPLE_SIZE)
+    {
+        diagnostics->non_idle_sample[diagnostics->non_idle_sample_size++] = byte;
+    }
+}
+
+static void log_i2s_diagnostics(const frame_parser_t *parser, i2s_diagnostics_t *diagnostics)
+{
+    i2s_fpga_statistics_t statistics;
+    i2s_get_fpga_statistics(&statistics);
+
+    ESP_LOGI(TAG,
+             "RX reads=%u timeouts=%u bytes=%u non-idle=%u zero=%u len12=%u parser=%u candidates=%u rejected=%u frames=%u/%u/%u",
+             (unsigned int)diagnostics->read_count,
+             (unsigned int)diagnostics->timeout_count,
+             (unsigned int)diagnostics->byte_count,
+             (unsigned int)diagnostics->non_idle_byte_count,
+             (unsigned int)diagnostics->zero_byte_count,
+             (unsigned int)diagnostics->length_byte_count,
+             (unsigned int)parser->state,
+             (unsigned int)diagnostics->header_candidate_count,
+             (unsigned int)diagnostics->rejected_length_count,
+             (unsigned int)diagnostics->statistics_frame_count,
+             (unsigned int)diagnostics->pid_report_frame_count,
+             (unsigned int)diagnostics->pat_frame_count);
+
+    if (diagnostics->non_idle_sample_size > 0)
+    {
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, diagnostics->non_idle_sample,
+                                 diagnostics->non_idle_sample_size, ESP_LOG_INFO);
+    }
+
+    if (statistics.available)
+    {
+        ESP_LOGI(TAG, "Latest FPGA statistics: sync=%u data-bytes=%u sync-errors=%u",
+                 (unsigned int)statistics.sync_count,
+             (unsigned int)statistics.data_bytes_received,
+             (unsigned int)statistics.sync_byte_errors);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "No complete FPGA statistics frame received yet");
+    }
+
+    memset(diagnostics, 0, sizeof(*diagnostics));
+}
+
+void i2s_get_fpga_statistics(i2s_fpga_statistics_t *statistics)
+{
+    if (!statistics)
+    {
+        return;
+    }
+
+    portENTER_CRITICAL(&statistics_lock);
+    *statistics = fpga_statistics;
+    portEXIT_CRITICAL(&statistics_lock);
+}
+
+void i2s_get_fpga_pid_report(i2s_fpga_pid_report_t *report)
+{
+    if (!report)
+    {
+        return;
+    }
+
+    portENTER_CRITICAL(&statistics_lock);
+    *report = fpga_pid_report;
+    portEXIT_CRITICAL(&statistics_lock);
+}
+
+void i2s_get_fpga_pat(i2s_fpga_pat_t *pat)
+{
+    if (!pat)
+    {
+        return;
+    }
+
+    portENTER_CRITICAL(&statistics_lock);
+    *pat = fpga_pat;
+    portEXIT_CRITICAL(&statistics_lock);
+}
 
 /**
  * @brief Initializes the I2S peripheral in slave RX mode using the standard driver API.
@@ -51,19 +315,13 @@ esp_err_t i2s_init(void)
 
     /* Standard mode configuration for the RX channel */
     i2s_std_config_t std_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(10000000/128),
-        .slot_cfg = {
-            .data_bit_width = I2S_DATA_BIT_WIDTH_8BIT,
-            .slot_bit_width = I2S_DATA_BIT_WIDTH_8BIT,
-            .slot_mode = I2S_SLOT_MODE_MONO,
-            .slot_mask = I2S_STD_SLOT_BOTH,
-            .left_align = false,
-            .big_endian = false,
-            .bit_order_lsb = false},
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(I2S_SAMPLE_RATE_HZ),
+        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(
+            I2S_DATA_BIT_WIDTH_8BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
             .bclk = GPIO_I2S_BCK,
-            .ws = I2S_GPIO_UNUSED,
+            .ws = GPIO_I2S_WS,
             .dout = I2S_GPIO_UNUSED,
             .din = GPIO_I2S_DAT,
             .invert_flags = {
@@ -98,6 +356,9 @@ esp_err_t i2s_init(void)
 
     ESP_LOGI(TAG, "I2S slave driver initialized successfully using STD API on port %d.", (int)I2S_PORT_NUM);
     ESP_LOGI(TAG, "Pins: WS=%d, BCK=%d, DAT_IN=%d", (int)GPIO_I2S_WS, (int)GPIO_I2S_BCK, (int)GPIO_I2S_DAT);
+    ESP_LOGI(TAG, "Expected timing: frame-rate=%u Hz, BCK=%u Hz",
+             (unsigned int)I2S_SAMPLE_RATE_HZ,
+             (unsigned int)(I2S_SAMPLE_RATE_HZ * 2 * 8));
     ESP_LOGI(TAG, "DMA Buffers: %d x %d frames.", I2S_DMA_BUF_COUNT, I2S_DMA_FRAMES_PER_BUFFER);
     ESP_LOGI(TAG, "Each frame: %d bytes (stereo 8-bit). Total DMA buffer size: %d bytes.",
              (int)(I2S_SLOT_MODE_STEREO * (I2S_DATA_BIT_WIDTH_8BIT / 8)),
@@ -114,10 +375,6 @@ esp_err_t i2s_init(void)
     return ESP_OK;
 }
 
-/*
- * Example of how to read data:
- */
-
 #define I2S_READ_BUF_SIZE 188
 
 uint8_t i2s_rx_buffer[I2S_READ_BUF_SIZE];
@@ -125,6 +382,10 @@ size_t bytes_read;
 
 void i2s_read_task(void *arg)
 {
+    frame_parser_t parser = {0};
+    i2s_diagnostics_t diagnostics = {0};
+    TickType_t next_diagnostic_tick = xTaskGetTickCount() + pdMS_TO_TICKS(I2S_DIAGNOSTIC_INTERVAL_MS);
+
     if (!rx_chan)
     {
         ESP_LOGE(TAG, "I2S RX channel not initialized for read task.");
@@ -133,24 +394,32 @@ void i2s_read_task(void *arg)
     }
     while (1)
     {
-        memset(i2s_rx_buffer, 0x00, I2S_READ_BUF_SIZE);
-        esp_err_t read_err = i2s_channel_read(rx_chan, i2s_rx_buffer, I2S_READ_BUF_SIZE, &bytes_read, portMAX_DELAY);
+        esp_err_t read_err = i2s_channel_read(rx_chan, i2s_rx_buffer, I2S_READ_BUF_SIZE,
+                              &bytes_read, I2S_READ_TIMEOUT_MS);
 
         if (read_err == ESP_OK)
         {
-            if (bytes_read == I2S_READ_BUF_SIZE)
+            diagnostics.read_count++;
+            for (size_t index = 0; index < bytes_read; index++)
             {
-                ESP_LOGW(TAG, "Read %d bytes, full buffer!", (int)bytes_read);
-                ESP_LOG_BUFFER_HEX(TAG, i2s_rx_buffer, I2S_READ_BUF_SIZE);
+                record_diagnostic_byte(&diagnostics, i2s_rx_buffer[index]);
+                parse_frame_byte(&parser, &diagnostics, i2s_rx_buffer[index]);
             }
-            else if (bytes_read > 0)
-            {
-                ESP_LOGW(TAG, "Read %d bytes, expected %d. Partial read?", (int)bytes_read, (int)I2S_READ_BUF_SIZE);
-            }
+
+        }
+        else if (read_err == ESP_ERR_TIMEOUT)
+        {
+            diagnostics.timeout_count++;
         }
         else
         {
             ESP_LOGE(TAG, "I2S channel read error: %s", esp_err_to_name(read_err));
+        }
+
+        if ((int32_t)(xTaskGetTickCount() - next_diagnostic_tick) >= 0)
+        {
+            log_i2s_diagnostics(&parser, &diagnostics);
+            next_diagnostic_tick = xTaskGetTickCount() + pdMS_TO_TICKS(I2S_DIAGNOSTIC_INTERVAL_MS);
         }
     }
 }

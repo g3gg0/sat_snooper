@@ -52,7 +52,9 @@ int i2c_transfer(struct i2c_adapter *state, struct i2c_msg *msg, uint32_t msg_co
 
         if (ret != ESP_OK)
         {
-            ESP_LOGI(PRINTK_TAG, "i2c_transfer: Error during transfer, ret=%d", ret);
+            ESP_LOGE(PRINTK_TAG, "I2C transfer failed: message=%d address=0x%02x operation=%s error=%s",
+                     i, msg[i].addr, (msg[i].flags & I2C_M_RD) ? "read" : "write",
+                     esp_err_to_name(ret));
             return -EREMOTEIO;
         }
     }

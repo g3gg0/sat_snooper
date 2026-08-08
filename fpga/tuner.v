@@ -8,6 +8,7 @@
 module tuner
 (
     input        clk,           /* write clock                             */
+    input        rst_n,         /* active-low reset                        */
     input        valid,         /* data valid                              */
     input        sync,          /* start-of-packet                         */
     input        d0,
@@ -25,7 +26,11 @@ module tuner
     /* Outputs for streaming synced data to I2S */
     output [7:0] stream_data_out,
     output       stream_data_valid_out,
-    output       stream_sync_pulse_out
+    output       stream_sync_pulse_out,
+    output       stream_sync_error_out,
+    output [7:0] stream_byte_index_out,
+    output       stream_pid_valid_out,
+    output [12:0] stream_pid_out
 );
 
     /* -- RAM is removed -- */
@@ -36,19 +41,33 @@ module tuner
     wire sync_module_sync_pulse;
     wire sync_module_byte_enable;
     wire sync_module_is_in_sync; /* Can be used for status if needed */
+    reg [7:0] stream_data_reg = 8'd0;
 
     mpeg_ts_sync_pid u_mpeg_ts_sync (
         .clk                (clk),
+        .rst_n              (rst_n),
         .data_valid         (valid),
+        .packet_sync        (sync),
         .data_byte_in       (data_byte_in),
         .sync_pulse         (sync_module_sync_pulse),
         .byte_enable_out    (sync_module_byte_enable),
         .is_in_sync         (sync_module_is_in_sync),
-        .led_toggle_signal  (synced_packet_led_toggle)
+        .led_toggle_signal  (synced_packet_led_toggle),
+        .sync_error_pulse   (stream_sync_error_out),
+        .packet_byte_index  (stream_byte_index_out),
+        .pid_valid          (stream_pid_valid_out),
+        .packet_pid         (stream_pid_out)
     );
 
     /* Assign outputs for streaming */
-    assign stream_data_out = data_byte_in; /* Output the current input byte */
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            stream_data_reg <= 8'd0;
+        else if (valid)
+            stream_data_reg <= data_byte_in;
+    end
+
+    assign stream_data_out = stream_data_reg;
     assign stream_data_valid_out = sync_module_byte_enable; /* Valid when sync module says byte is enabled */
     assign stream_sync_pulse_out = sync_module_sync_pulse; /* Pass through sync pulse */
 

@@ -20,6 +20,7 @@
 #include "linux_adapter.h" /* For KERN_INFO, printk, etc. and potentially stubs */
 #include "cx24116_linux.h" /* For cx24116_attach, struct cx24116_config, struct dvb_frontend, struct i2c_adapter */
 #include "voltage.h"
+#include "led.h"
 
 #include "gpio_config.h"
 #include "driver/gpio.h"
@@ -52,7 +53,7 @@ static struct i2c_adapter g_linux_i2c_adapter_dummy;
 static struct
 {
     struct arg_int *freq_mhz;
-    struct arg_int *sr_sps;
+    struct arg_int *sr_ksps;
     struct arg_int *fec;
     struct arg_int *inv;
     struct arg_int *delsys;
@@ -120,7 +121,7 @@ static struct
  * @return Returns 'true' if the high-band LO (10600 MHz) was used.
  * Returns 'false' if the low-band LO was used or if an error occurred.
  */
-bool convert_ku_to_l_band(uint32_t ku_band_freq_mhz, uint32_t *l_band_freq_mhz_out)
+static bool convert_ku_to_l_band(uint32_t ku_band_freq_mhz, uint32_t *l_band_freq_mhz_out)
 {
     // --- Input Validation ---
     if (l_band_freq_mhz_out == NULL)
@@ -162,11 +163,12 @@ bool convert_ku_to_l_band(uint32_t ku_band_freq_mhz, uint32_t *l_band_freq_mhz_o
     return is_high_band;
 }
 
-int tuner_reset(struct dvb_frontend *fe)
+static int tuner_reset(struct dvb_frontend *fe)
 {
-    tuner_reset_set(true);
+    (void)fe;
+    tuner_set_reset(true);
     vTaskDelay(pdMS_TO_TICKS(20));
-    tuner_reset_set(false);
+    tuner_set_reset(false);
 
     return 0;
 }
@@ -290,9 +292,11 @@ static int do_tuner_status_cmd(int argc, char **argv)
     return 0;
 }
 
-int tuner_init()
+esp_err_t tuner_initialize(void)
 {
-    tuner_reset_set(false);
+    tuner_set_reset(false);
+    tuner_initialized = false;
+    led_set_tuner_status(false, false, false);
 
     ESP_LOGI(TAG_CX, "Initializing tuner with Linux driver logic...");
     ESP_LOGI(TAG_CX, "I2C Addr: 0x%02X", CX24116_DEFAULT_ADDRESS);
@@ -339,26 +343,28 @@ int tuner_init()
                     g_linux_dvb_frontend->ops.release(g_linux_dvb_frontend);
                 }
                 g_linux_dvb_frontend = NULL;
-                return 1;
+                return ESP_FAIL;
             }
         }
         else
         {
             ESP_LOGE(TAG_CX, "Frontend init function not available.");
-            return 1;
+            return ESP_ERR_NOT_SUPPORTED;
         }
     }
     else
     {
         ESP_LOGE(TAG_CX, "cx24116_attach failed.");
-        return 1;
+        return ESP_FAIL;
     }
-    return 0;
+    tuner_initialized = true;
+    led_set_tuner_status(true, false, false);
+    return ESP_OK;
 }
 
 static int do_tuner_init_cmd(int argc, char **argv)
 {
-    return tuner_init();
+    return tuner_initialize() == ESP_OK ? 0 : 1;
 }
 
 static int do_tuner_tune_cmd(int argc, char **argv)
@@ -370,72 +376,34 @@ static int do_tuner_tune_cmd(int argc, char **argv)
         return 1;
     }
 
-    if (!g_linux_dvb_frontend)
-    {
-        ESP_LOGE(TAG_CX, "Tuner not initialized. Call tuner_init first.");
-        return 1;
-    }
+    const tuner_tune_request_t request = {
+        .frequency_mhz = tuner_tune_cmd_args.freq_mhz->ival[0],
+        .symbol_rate_ksps = tuner_tune_cmd_args.sr_ksps->ival[0],
+        .polarization = voltage_get_current() == VOLTAGE_18V
+                            ? TUNER_POLARIZATION_HORIZONTAL
+                            : TUNER_POLARIZATION_VERTICAL,
+        .fec = (tuner_fec_t)tuner_tune_cmd_args.fec->ival[0],
+        .inversion = (tuner_inversion_t)tuner_tune_cmd_args.inv->ival[0],
+        .delivery_system = (tuner_delivery_system_t)tuner_tune_cmd_args.delsys->ival[0],
+        .modulation = (tuner_modulation_t)tuner_tune_cmd_args.mod->ival[0],
+        .pilot = (tuner_pilot_t)tuner_tune_cmd_args.pilot->ival[0],
+        .rolloff = (tuner_rolloff_t)tuner_tune_cmd_args.rolloff->ival[0],
+    };
 
-    struct dtv_frontend_properties *c = &g_linux_dvb_frontend->dtv_property_cache;
-
-    uint32_t freq = 0;
-    bool high_band = convert_ku_to_l_band(tuner_tune_cmd_args.freq_mhz->ival[0], &freq);
-
-    /* https://www.linuxtv.org/downloads/v4l-dvb-internals/device-drivers/API-struct-dtv-frontend-properties.html */
-    c->frequency = freq * 1000;
-    c->sectone = high_band ? SEC_TONE_ON : SEC_TONE_OFF;
-    c->symbol_rate = tuner_tune_cmd_args.sr_sps->ival[0] * 1000;
-    c->fec_inner = (enum fe_code_rate)tuner_tune_cmd_args.fec->ival[0];
-    c->inversion = (enum fe_spectral_inversion)tuner_tune_cmd_args.inv->ival[0];
-    c->delivery_system = (enum fe_delivery_system)tuner_tune_cmd_args.delsys->ival[0];
-    c->modulation = (enum fe_modulation)tuner_tune_cmd_args.mod->ival[0];
-    c->pilot = (enum fe_pilot)tuner_tune_cmd_args.pilot->ival[0];
-    c->rolloff = (enum fe_rolloff)tuner_tune_cmd_args.rolloff->ival[0];
-    /* Other dtv_frontend_properties like bandwidth_hz might be set by the driver or need defaults */
-
-    ESP_LOGI(TAG_CX, "Populating DTV properties: Freq=%lu kHz, SR=%lu Sps, DelSys=%d, Mod=%d, FEC=%d, Inv=%d, Pilot=%d, Rolloff=%d",
-             c->frequency, c->symbol_rate, c->delivery_system, c->modulation, c->fec_inner, c->inversion, c->pilot, c->rolloff);
-
-    if (g_linux_dvb_frontend->ops.tune)
-    {
-        unsigned int delay_ticks = 0;
-        enum fe_status status_val = 0;
-
-        ESP_LOGI(TAG_CX, "Calling frontend ops.tune...");
-        /* Call with re_tune = true to make set_frontend use the new DTV properties */
-        int ret = g_linux_dvb_frontend->ops.tune(g_linux_dvb_frontend, true, 0, &delay_ticks, &status_val);
-
-        if (ret == 0)
-        {
-            ESP_LOGI(TAG_CX, "tuner_tune command successful. FE Status: 0x%02x. Suggested delay (ticks): %u", status_val, delay_ticks);
-            ESP_LOGI(TAG_CX, "FE_STATUS: Sig:%d Carr:%d Vit:%d Sync:%d Lock:%d",
-                     (status_val & FE_HAS_SIGNAL) ? 1 : 0,
-                     (status_val & FE_HAS_CARRIER) ? 1 : 0,
-                     (status_val & FE_HAS_VITERBI) ? 1 : 0,
-                     (status_val & FE_HAS_SYNC) ? 1 : 0,
-                     (status_val & FE_HAS_LOCK) ? 1 : 0);
-        }
-        else
-        {
-            ESP_LOGE(TAG_CX, "tuner_tune command failed (ret: %d)", ret);
-            return 1;
-        }
-    }
-    else
-    {
-        ESP_LOGE(TAG_CX, "Frontend tune function not available in ops table.");
-        return 1;
-    }
-    return 0;
+    return tuner_tune(&request) == ESP_OK ? 0 : 1;
 }
 
-void tuner_reset_set(bool state)
+void tuner_set_reset(bool active)
 {
-    tuner_reset_active = state;
+    tuner_reset_active = active;
     gpio_set_level(GPIO_TUNER_RESET, tuner_reset_active ? 0 : 1);
+    if (active)
+    {
+        led_set_tuner_status(tuner_initialized, false, false);
+    }
 }
 
-bool tuner_reset_get()
+bool tuner_get_reset(void)
 {
     return tuner_reset_active;
 }
@@ -464,7 +432,7 @@ static int do_tuner_reset_cmd(int argc, char **argv)
     }
 
     ESP_LOGI(TAG_CX, "Setting GPIO_TUNER_RESET to %d", level);
-    tuner_reset_set(level);
+    tuner_set_reset(level);
     ESP_LOGI(TAG_CX, "GPIO_TUNER_RESET set to %d", level);
 
     return 0;
@@ -721,35 +689,137 @@ static int do_tuner_voltage_cmd(int argc, char **argv)
     return 0;
 }
 
-/* Function to get current tuner status for web API */
-esp_err_t tuner_get_status_data(tuner_status_t *status_data)
+static bool decode_acquired_mode(uint8_t fec_status, tuner_status_t *status)
 {
-    if (!status_data || !tuner_initialized)
+    uint8_t mode = fec_status & 0x1f;
+    status->acquired_pilot_on = (fec_status & 0x80) != 0;
+
+    if ((fec_status & 0x20) != 0)
+    {
+        if (mode < TUNER_FEC_1_2 || mode > TUNER_FEC_8_9)
+        {
+            return false;
+        }
+        status->acquired_delivery_system = TUNER_DELIVERY_DVB_S;
+        status->acquired_modulation = TUNER_MODULATION_QPSK;
+        status->acquired_fec = (tuner_fec_t)mode;
+        return true;
+    }
+
+    status->acquired_delivery_system = TUNER_DELIVERY_DVB_S2;
+    switch (mode)
+    {
+    case 0x04:
+        status->acquired_modulation = TUNER_MODULATION_QPSK;
+        status->acquired_fec = TUNER_FEC_1_2;
+        return true;
+    case 0x05:
+    case 0x0c:
+        status->acquired_modulation = mode == 0x05 ? TUNER_MODULATION_QPSK : TUNER_MODULATION_8PSK;
+        status->acquired_fec = TUNER_FEC_3_5;
+        return true;
+    case 0x06:
+    case 0x0d:
+        status->acquired_modulation = mode == 0x06 ? TUNER_MODULATION_QPSK : TUNER_MODULATION_8PSK;
+        status->acquired_fec = TUNER_FEC_2_3;
+        return true;
+    case 0x07:
+    case 0x0e:
+        status->acquired_modulation = mode == 0x07 ? TUNER_MODULATION_QPSK : TUNER_MODULATION_8PSK;
+        status->acquired_fec = TUNER_FEC_3_4;
+        return true;
+    case 0x08:
+        status->acquired_modulation = TUNER_MODULATION_QPSK;
+        status->acquired_fec = TUNER_FEC_4_5;
+        return true;
+    case 0x09:
+    case 0x0f:
+        status->acquired_modulation = mode == 0x09 ? TUNER_MODULATION_QPSK : TUNER_MODULATION_8PSK;
+        status->acquired_fec = TUNER_FEC_5_6;
+        return true;
+    case 0x0a:
+    case 0x10:
+        status->acquired_modulation = mode == 0x0a ? TUNER_MODULATION_QPSK : TUNER_MODULATION_8PSK;
+        status->acquired_fec = TUNER_FEC_8_9;
+        return true;
+    case 0x0b:
+    case 0x11:
+        status->acquired_modulation = mode == 0x0b ? TUNER_MODULATION_QPSK : TUNER_MODULATION_8PSK;
+        status->acquired_fec = TUNER_FEC_9_10;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void read_tuner_diagnostics(tuner_status_t *status)
+{
+    struct cx24116_diagnostics diagnostics = {0};
+    if (cx24116_get_diagnostics(g_linux_dvb_frontend, &diagnostics) != 0)
+    {
+        return;
+    }
+
+    status->chip_id_available = true;
+    status->chip_id = diagnostics.chip_id;
+    status->firmware_version_available = diagnostics.firmware_version_valid;
+    memcpy(status->firmware_version, diagnostics.firmware_version,
+           sizeof(status->firmware_version));
+
+    if (diagnostics.firmware_status >= 0)
+    {
+        status->firmware_running_available = true;
+        status->firmware_running = diagnostics.firmware_status == 0;
+    }
+    if (diagnostics.qstatus >= 0)
+    {
+        status->lnb_ready_available = true;
+        status->lnb_ready = (diagnostics.qstatus & 0x20) != 0;
+    }
+    if (diagnostics.quality8 >= 0 && diagnostics.quality0 >= 0)
+    {
+        status->esno_available = true;
+        status->esno_tenth_db = ((uint16_t)diagnostics.quality8 << 8) |
+                               (uint16_t)diagnostics.quality0;
+    }
+    if ((status->flags & TUNER_STATUS_LOCK) != 0 && diagnostics.fec_status >= 0)
+    {
+        status->acquired_mode_available = decode_acquired_mode(
+            (uint8_t)diagnostics.fec_status, status);
+    }
+}
+
+esp_err_t tuner_get_status(tuner_status_t *status)
+{
+    if (!status)
     {
         return ESP_ERR_INVALID_ARG;
     }
 
-    memset(status_data, 0, sizeof(tuner_status_t));
+    memset(status, 0, sizeof(*status));
 
-    if (!g_linux_dvb_frontend)
+    if (!tuner_initialized || !g_linux_dvb_frontend)
     {
         ESP_LOGE(TAG_CX, "Tuner not initialized. Cannot get status.");
-        status_data->initialized = false;
         return ESP_ERR_INVALID_STATE;
     }
 
-    status_data->initialized = true;
+    status->initialized = true;
+    if (tuner_reset_active)
+    {
+        led_set_tuner_status(true, false, false);
+        return ESP_OK;
+    }
+
     int ret;
-    enum fe_status fe_stat_val = 0; /* Temporary variable for fe_status */
+    enum fe_status fe_stat_val = 0;
 
     if (g_linux_dvb_frontend->ops.read_status)
     {
-        /* Cast the address of status_data->status_flags to enum fe_status* */
-        /* This assumes tuner_status_t.status_flags is compatible in size and meaning with fe_status */
         ret = g_linux_dvb_frontend->ops.read_status(g_linux_dvb_frontend, &fe_stat_val);
         if (ret == 0)
         {
-            status_data->status_flags = (uint32_t)fe_stat_val;
+            status->flags = (uint32_t)fe_stat_val;
         }
         else
         {
@@ -764,8 +834,12 @@ esp_err_t tuner_get_status_data(tuner_status_t *status_data)
 
     if (g_linux_dvb_frontend->ops.read_snr)
     {
-        ret = g_linux_dvb_frontend->ops.read_snr(g_linux_dvb_frontend, &status_data->snr);
-        if (ret != 0)
+        ret = g_linux_dvb_frontend->ops.read_snr(g_linux_dvb_frontend, &status->snr);
+        if (ret == 0)
+        {
+            status->snr_available = true;
+        }
+        else
         {
             ESP_LOGE(TAG_CX, "Failed to read SNR (ret: %d)", ret);
         }
@@ -777,8 +851,12 @@ esp_err_t tuner_get_status_data(tuner_status_t *status_data)
 
     if (g_linux_dvb_frontend->ops.read_signal_strength)
     {
-        ret = g_linux_dvb_frontend->ops.read_signal_strength(g_linux_dvb_frontend, &status_data->strength);
-        if (ret != 0)
+        ret = g_linux_dvb_frontend->ops.read_signal_strength(g_linux_dvb_frontend, &status->strength);
+        if (ret == 0)
+        {
+            status->strength_available = true;
+        }
+        else
         {
             ESP_LOGE(TAG_CX, "Failed to read signal strength (ret: %d)", ret);
         }
@@ -790,8 +868,12 @@ esp_err_t tuner_get_status_data(tuner_status_t *status_data)
 
     if (g_linux_dvb_frontend->ops.read_ber)
     {
-        ret = g_linux_dvb_frontend->ops.read_ber(g_linux_dvb_frontend, &status_data->ber);
-        if (ret != 0)
+        ret = g_linux_dvb_frontend->ops.read_ber(g_linux_dvb_frontend, &status->ber);
+        if (ret == 0)
+        {
+            status->ber_available = true;
+        }
+        else
         {
             ESP_LOGE(TAG_CX, "Failed to read BER (ret: %d)", ret);
         }
@@ -803,8 +885,12 @@ esp_err_t tuner_get_status_data(tuner_status_t *status_data)
 
     if (g_linux_dvb_frontend->ops.read_ucblocks)
     {
-        ret = g_linux_dvb_frontend->ops.read_ucblocks(g_linux_dvb_frontend, &status_data->uc_blocks);
-        if (ret != 0)
+        ret = g_linux_dvb_frontend->ops.read_ucblocks(g_linux_dvb_frontend, &status->uncorrected_blocks);
+        if (ret == 0)
+        {
+            status->uncorrected_blocks_available = true;
+        }
+        else
         {
             ESP_LOGE(TAG_CX, "Failed to read uncorrected blocks (ret: %d)", ret);
         }
@@ -814,46 +900,112 @@ esp_err_t tuner_get_status_data(tuner_status_t *status_data)
         ESP_LOGW(TAG_CX, "read_ucblocks operation not available.");
     }
 
+    led_set_tuner_status(true,
+                         (status->flags & TUNER_STATUS_CARRIER) != 0,
+                         (status->flags & TUNER_STATUS_VITERBI) != 0);
+    read_tuner_diagnostics(status);
+
     return ESP_OK;
 }
 
-/* Function to perform tuning based on parameters from web API */
-esp_err_t tuner_web_tune(const tuner_tune_params_t *params)
+bool tuner_is_initialized(void)
 {
-    if (!params || !tuner_initialized)
+    return tuner_initialized;
+}
+
+static bool tuner_request_is_valid(const tuner_tune_request_t *request)
+{
+    if (request->frequency_mhz < KU_BAND_MIN_FREQ || request->frequency_mhz > KU_BAND_MAX_FREQ ||
+        request->symbol_rate_ksps < 1000 || request->symbol_rate_ksps > 45000)
+    {
+        return false;
+    }
+
+    if (request->polarization != TUNER_POLARIZATION_VERTICAL &&
+        request->polarization != TUNER_POLARIZATION_HORIZONTAL)
+    {
+        return false;
+    }
+
+    if (request->fec < TUNER_FEC_NONE || request->fec > TUNER_FEC_2_5 ||
+        request->inversion < TUNER_INVERSION_OFF || request->inversion > TUNER_INVERSION_AUTO ||
+        request->pilot < TUNER_PILOT_ON || request->pilot > TUNER_PILOT_AUTO ||
+        request->rolloff < TUNER_ROLLOFF_35 || request->rolloff > TUNER_ROLLOFF_AUTO)
+    {
+        return false;
+    }
+
+    if (request->delivery_system == TUNER_DELIVERY_DVB_S)
+    {
+        return request->modulation == TUNER_MODULATION_QPSK &&
+               request->rolloff == TUNER_ROLLOFF_35 &&
+               request->fec <= TUNER_FEC_AUTO;
+    }
+
+    if (request->delivery_system != TUNER_DELIVERY_DVB_S2 ||
+        request->rolloff == TUNER_ROLLOFF_AUTO)
+    {
+        return false;
+    }
+
+    switch (request->fec)
+    {
+    case TUNER_FEC_3_5:
+    case TUNER_FEC_2_3:
+    case TUNER_FEC_3_4:
+    case TUNER_FEC_5_6:
+    case TUNER_FEC_8_9:
+    case TUNER_FEC_9_10:
+        return request->modulation == TUNER_MODULATION_QPSK ||
+               request->modulation == TUNER_MODULATION_8PSK;
+    case TUNER_FEC_1_2:
+    case TUNER_FEC_4_5:
+        return request->modulation == TUNER_MODULATION_QPSK;
+    default:
+        return false;
+    }
+}
+
+esp_err_t tuner_tune(const tuner_tune_request_t *request)
+{
+    if (!request || !tuner_request_is_valid(request))
     {
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!g_linux_dvb_frontend)
+    if (!tuner_initialized || !g_linux_dvb_frontend)
     {
         ESP_LOGE(TAG_CX, "Tuner not initialized. Call tuner_init first.");
         return ESP_ERR_INVALID_STATE;
     }
 
-    voltage_select(params->pol ? VOLTAGE_18V : VOLTAGE_13V);
+    led_set_tuner_status(true, false, false);
+
+    voltage_select(request->polarization == TUNER_POLARIZATION_HORIZONTAL ? VOLTAGE_18V : VOLTAGE_13V);
 
     struct dtv_frontend_properties *c = &g_linux_dvb_frontend->dtv_property_cache;
 
     uint32_t freq = 0;
-    bool high_band = convert_ku_to_l_band(params->freq_mhz, &freq);
+    bool high_band = convert_ku_to_l_band(request->frequency_mhz, &freq);
+    if (freq == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     /* Convert MHz to kHz and kSps to Sps for the dtv_property_cache */
     c->frequency = freq * 1000;
     c->sectone = high_band ? SEC_TONE_ON : SEC_TONE_OFF;
-    c->symbol_rate = params->sr_ksps * 1000;
+    c->symbol_rate = request->symbol_rate_ksps * 1000;
 
-    /* Directly use integer values from params for enums, assuming they match DVB API definitions */
-    /* It's crucial that the values sent from the web UI correspond to valid enum values */
-    c->fec_inner = (enum fe_code_rate)params->fec;
-    c->inversion = (enum fe_spectral_inversion)params->inv;
-    c->delivery_system = (enum fe_delivery_system)params->delsys;
-    c->modulation = (enum fe_modulation)params->mod;
-    c->pilot = (enum fe_pilot)params->pilot;
-    c->rolloff = (enum fe_rolloff)params->rolloff;
+    c->fec_inner = (enum fe_code_rate)request->fec;
+    c->inversion = (enum fe_spectral_inversion)request->inversion;
+    c->delivery_system = (enum fe_delivery_system)request->delivery_system;
+    c->modulation = (enum fe_modulation)request->modulation;
+    c->pilot = (enum fe_pilot)request->pilot;
+    c->rolloff = (enum fe_rolloff)request->rolloff;
 
-    ESP_LOGI(TAG_CX, "Web Tune: Input_Ku=%lu MHz, Freq_L=%lu kHz, %s, SR=%lu Sps, DelSys=%d, Mod=%d, FEC=%d, Inv=%d, Pilot=%d, Rolloff=%d, sectone=%d",
-             params->freq_mhz, c->frequency, high_band ? "HI" : "LO", c->symbol_rate, c->delivery_system, c->modulation, c->fec_inner, c->inversion, c->pilot, c->rolloff, c->sectone);
+    ESP_LOGI(TAG_CX, "Tune: Input_Ku=%lu MHz, Freq_L=%lu kHz, %s, SR=%lu Sps, DelSys=%d, Mod=%d, FEC=%d, Inv=%d, Pilot=%d, Rolloff=%d, sectone=%d",
+             request->frequency_mhz, c->frequency, high_band ? "HI" : "LO", c->symbol_rate, c->delivery_system, c->modulation, c->fec_inner, c->inversion, c->pilot, c->rolloff, c->sectone);
 
     if (g_linux_dvb_frontend->ops.set_tone)
     {
@@ -861,7 +1013,7 @@ esp_err_t tuner_web_tune(const tuner_tune_params_t *params)
         if (ret != 0)
         {
             ESP_LOGE(TAG_CX, "Failed to set tuner tone (ret: %d).", ret);
-            return 1;
+            return ESP_FAIL;
         }
     }
 
@@ -870,18 +1022,21 @@ esp_err_t tuner_web_tune(const tuner_tune_params_t *params)
         unsigned int delay_ticks = 0;
         enum fe_status status_val = 0;
 
-        ESP_LOGI(TAG_CX, "Calling frontend ops.tune via web request...");
+        ESP_LOGI(TAG_CX, "Calling frontend ops.tune...");
         int ret = g_linux_dvb_frontend->ops.tune(g_linux_dvb_frontend, true, 0, &delay_ticks, &status_val);
 
         if (ret == 0)
         {
-            ESP_LOGI(TAG_CX, "Web tuner_tune command successful. FE Status: 0x%02x. Delay: %u ticks", status_val, delay_ticks);
+            ESP_LOGI(TAG_CX, "Tune successful. FE Status: 0x%02x. Delay: %u ticks", status_val, delay_ticks);
+            led_set_tuner_status(true,
+                                 (status_val & FE_HAS_CARRIER) != 0,
+                                 (status_val & FE_HAS_VITERBI) != 0);
             return ESP_OK;
         }
         else
         {
-            ESP_LOGE(TAG_CX, "Web tuner_tune command failed (ret: %d)", ret);
-            return ESP_FAIL; /* Or a more specific error code if available */
+            ESP_LOGE(TAG_CX, "Tune failed (ret: %d)", ret);
+            return ESP_FAIL;
         }
     }
     else
@@ -889,12 +1044,12 @@ esp_err_t tuner_web_tune(const tuner_tune_params_t *params)
         ESP_LOGE(TAG_CX, "Frontend tune function not available in ops table.");
         return ESP_ERR_NOT_SUPPORTED;
     }
-    return ESP_FAIL; /* Should not be reached if ops.tune exists */
+    return ESP_FAIL;
 }
 
-void tuner_init_base(void)
+void tuner_register_console(void)
 {
-    tuner_reset_set(true);
+    tuner_set_reset(true);
 
     /* Register tuner_init command */
     const esp_console_cmd_t tuner_init_cmd = {
@@ -906,7 +1061,7 @@ void tuner_init_base(void)
 
     /* Register tuner_tune command */
     tuner_tune_cmd_args.freq_mhz = arg_int1("f", "freq", "<MHz>", "Frequency in MHz");
-    tuner_tune_cmd_args.sr_sps = arg_int1("s", "sr", "<Sps>", "Symbol Rate in Sps");
+    tuner_tune_cmd_args.sr_ksps = arg_int1("s", "sr", "<kSps>", "Symbol rate in kSym/s");
     tuner_tune_cmd_args.fec = arg_int1(NULL, "fec", "<val>", "FEC (see DVB API fe_code_rate)");
     tuner_tune_cmd_args.inv = arg_int1(NULL, "inv", "<val>", "Inversion (see DVB API fe_spectral_inversion)");
     tuner_tune_cmd_args.delsys = arg_int1(NULL, "delsys", "<val>", "Delivery System (see DVB API fe_delivery_system)");
@@ -987,5 +1142,4 @@ void tuner_init_base(void)
         .argtable = &tuner_voltage_cmd_args};
     ESP_ERROR_CHECK(esp_console_cmd_register(&tuner_voltage_console_cmd));
 
-    tuner_initialized = true;
 }

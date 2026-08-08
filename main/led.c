@@ -5,13 +5,88 @@
 #include "argtable3/argtable3.h"
 #include "led_strip.h"
 #include "gpio_config.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 static led_strip_handle_t s_led_strip;
+static SemaphoreHandle_t s_led_mutex;
+static bool s_wifi_connected;
+static int8_t s_wifi_rssi = -127;
+static bool s_tuner_initialized;
+static bool s_tuner_carrier;
+static bool s_tuner_viterbi;
 
-void led_set_color(uint8_t r, uint8_t g, uint8_t b)
+#define LED_LEVEL 32
+
+static void led_write_color(uint8_t r, uint8_t g, uint8_t b)
 {
     ESP_ERROR_CHECK(led_strip_set_pixel(s_led_strip, 0, r, g, b));
     ESP_ERROR_CHECK(led_strip_refresh(s_led_strip));
+}
+
+static void led_apply_status_locked(void)
+{
+    if (s_tuner_initialized)
+    {
+        if (s_tuner_carrier && s_tuner_viterbi)
+        {
+            led_write_color(0, 0, LED_LEVEL);
+        }
+        else if (s_tuner_carrier)
+        {
+            led_write_color(LED_LEVEL, 0, LED_LEVEL);
+        }
+        else
+        {
+            led_write_color(LED_LEVEL, 0, 0);
+        }
+        return;
+    }
+
+    if (!s_wifi_connected || s_wifi_rssi <= -80)
+    {
+        led_write_color(LED_LEVEL, 0, 0);
+    }
+    else if (s_wifi_rssi <= -68)
+    {
+        led_write_color(LED_LEVEL, LED_LEVEL, 0);
+    }
+    else
+    {
+        led_write_color(0, LED_LEVEL, 0);
+    }
+}
+
+void led_set_color(uint8_t r, uint8_t g, uint8_t b)
+{
+    if (xSemaphoreTake(s_led_mutex, portMAX_DELAY) == pdTRUE)
+    {
+        led_write_color(r, g, b);
+        xSemaphoreGive(s_led_mutex);
+    }
+}
+
+void led_set_wifi_status(bool connected, int8_t rssi)
+{
+    if (xSemaphoreTake(s_led_mutex, portMAX_DELAY) == pdTRUE)
+    {
+        s_wifi_connected = connected;
+        s_wifi_rssi = rssi;
+        led_apply_status_locked();
+        xSemaphoreGive(s_led_mutex);
+    }
+}
+
+void led_set_tuner_status(bool initialized, bool carrier, bool viterbi)
+{
+    if (xSemaphoreTake(s_led_mutex, portMAX_DELAY) == pdTRUE)
+    {
+        s_tuner_initialized = initialized;
+        s_tuner_carrier = carrier;
+        s_tuner_viterbi = viterbi;
+        led_apply_status_locked();
+        xSemaphoreGive(s_led_mutex);
+    }
 }
 
 static struct {
@@ -66,6 +141,8 @@ void led_init(void)
         .resolution_hz = 10000000, // 10MHz
     };
     ESP_ERROR_CHECK(led_strip_new_rmt_device(&led_strip_conf, &rmt_conf, &s_led_strip));
-    led_set_color(0, 0, 0);
+    s_led_mutex = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(s_led_mutex ? ESP_OK : ESP_ERR_NO_MEM);
+    led_set_wifi_status(false, -127);
     register_led_commands();
 }

@@ -1,586 +1,1116 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-    <title>Sat Snooper Control</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SAT Snooper | Tuner Bench</title>
     <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 20px; 
-            background-color: #121212; /* Dark background */
-            color: #e0e0e0; /* Light text */
+        :root {
+            color-scheme: dark;
+            --bg: #0d1110;
+            --surface: #151a18;
+            --surface-raised: #1b211e;
+            --line: #344039;
+            --line-soft: #252e29;
+            --text: #edf2ee;
+            --muted: #94a098;
+            --signal: #56d68b;
+            --signal-dim: #204b34;
+            --amber: #e5b454;
+            --danger: #ed6a63;
+            --cyan: #68b8c5;
+            --control-height: 42px;
         }
-        .container { 
-            background-color: #1e1e1e; /* Slightly lighter dark for container */
-            padding: 20px; 
-            border-radius: 8px; 
-            box-shadow: 0 0 15px rgba(0,0,0,0.5); 
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Bahnschrift", "Aptos", sans-serif;
+            color: var(--text);
+            background-color: var(--bg);
+            background-image: repeating-linear-gradient(
+                90deg,
+                transparent 0,
+                transparent 79px,
+                rgba(255, 255, 255, 0.018) 80px
+            );
         }
-        h1, h2 { 
-            color: #e0e0e0; 
-            border-bottom: 1px solid #444;
-            padding-bottom: 10px;
+
+        button, input, select { font: inherit; }
+
+        button {
+            min-height: var(--control-height);
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            padding: 0 16px;
+            color: var(--text);
+            background: var(--surface-raised);
+            cursor: pointer;
         }
-        .info-section, .control-section { 
-            margin-bottom: 20px; 
-            padding: 15px;
-            background-color: #2c2c2c;
-            border-radius: 6px;
+
+        button:hover { border-color: var(--muted); }
+        button:focus-visible, input:focus-visible, select:focus-visible {
+            outline: 2px solid var(--cyan);
+            outline-offset: 2px;
         }
-        .info-item, .control-item { 
-            margin-bottom: 12px; 
+        button:disabled { cursor: wait; opacity: 0.55; }
+
+        .primary {
+            border-color: var(--signal);
+            color: #07130c;
+            background: var(--signal);
+            font-weight: 700;
+        }
+
+        .primary:hover { background: #74e29f; }
+
+        header {
+            height: 72px;
+            padding: 0 28px;
             display: flex;
             align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            border-bottom: 1px solid var(--line);
+            background: rgba(13, 17, 16, 0.94);
         }
-        label { 
-            font-weight: bold; 
-            margin-right: 10px; 
-            color: #bbb; /* Lighter label color */
-            min-width: 180px; /* Align inputs */
-        }
-        input[type="number"], input[type="text"] { 
-            padding: 10px; 
-            border-radius: 4px; 
-            border: 1px solid #444; /* Darker border */
-            background-color: #333; /* Dark input background */
-            color: #e0e0e0; /* Light text in input */
-            width: 220px; 
-        }
-        button { 
-            padding: 10px 18px; 
-            background-color: #007bff; /* Primary button color - can adjust for dark theme */
-            color: white; 
-            border: none; 
-            border-radius: 4px; 
-            cursor: pointer; 
-            font-size: 1em;
-        }
-        button:hover { 
-            background-color: #0056b3; 
-        }
-        #tunerStatus { /* Changed from pre to div */
-            background-color: #2c2c2c; /* Darker background for status area */
-            padding: 15px; 
-            border-radius: 4px; 
-            min-height: 100px;
-        }
-        .status-button {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 4px;
-            color: white;
-            text-align: center;
-            min-width: 100px; 
-            font-weight: bold;
-        }
-        .status-green {
-            background-color: #28a745; /* Green */
-        }
-        .status-red {
-            background-color: #dc3545; /* Red */
-        }
-        .error { color: #ff6b6b; /* Lighter red for errors on dark bg */ }
-        .success { color: #69f0ae; /* Lighter green for success on dark bg */ }
-        #tuneResult, #actionResult { margin-top: 10px; font-weight: bold; min-height: 1.2em; /* Reserve space */ }
 
-        /* Styles for the toggle switch */
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 60px;
-            height: 34px;
+        .brand { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+        .brand strong { font-size: 21px; font-weight: 700; }
+        .brand span { color: var(--muted); font-family: "Cascadia Code", monospace; font-size: 12px; }
+
+        .connection {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            color: var(--muted);
+            font-family: "Cascadia Code", monospace;
+            font-size: 12px;
         }
-        .switch input { 
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #555; /* Darker slider background */
-            -webkit-transition: .4s;
-            transition: .4s;
-            border-radius: 34px;
-        }
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 26px;
-            width: 26px;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            -webkit-transition: .4s;
-            transition: .4s;
+
+        .connection-dot {
+            width: 9px;
+            height: 9px;
             border-radius: 50%;
+            background: var(--danger);
+            box-shadow: 0 0 0 3px rgba(237, 106, 99, 0.12);
         }
-        input:checked + .slider {
-            background-color: #007bff; /* Blue when checked */
+
+        .connection.online .connection-dot {
+            background: var(--signal);
+            box-shadow: 0 0 0 3px rgba(86, 214, 139, 0.12);
         }
-        input:focus + .slider {
-            box-shadow: 0 0 1px #007bff;
+
+        .hardware-bar {
+            min-height: 64px;
+            padding: 10px 28px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            border-bottom: 1px solid var(--line-soft);
+            background: var(--surface);
         }
-        input:checked + .slider:before {
-            -webkit-transform: translateX(26px);
-            -ms-transform: translateX(26px);
-            transform: translateX(26px);
+
+        .hardware-state {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-right: auto;
+            font-size: 13px;
+        }
+
+        .state-mark {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--amber);
+        }
+
+        .hardware-state.ready .state-mark { background: var(--signal); }
+
+        .switch-control {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .switch-control input {
+            appearance: none;
+            width: 42px;
+            height: 22px;
+            margin: 0;
+            border: 1px solid var(--line);
+            border-radius: 11px;
+            background: #252c29;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .switch-control input::after {
+            content: "";
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            top: 3px;
+            left: 4px;
+            border-radius: 50%;
+            background: var(--muted);
+            transition: transform 140ms ease, background 140ms ease;
+        }
+
+        .switch-control input:checked { border-color: var(--danger); }
+        .switch-control input:checked::after { transform: translateX(18px); background: var(--danger); }
+
+        main {
+            width: min(1180px, 100%);
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: minmax(0, 1.3fr) minmax(340px, 0.7fr);
+            min-height: calc(100vh - 136px);
+        }
+
+        section, aside { padding: 30px 28px; }
+        section { border-right: 1px solid var(--line); }
+
+        .section-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        h1, h2, p { margin: 0; }
+        h1, h2 { font-size: 16px; font-weight: 650; }
+        .section-head span { color: var(--muted); font: 11px "Cascadia Code", monospace; }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 18px 20px;
+        }
+
+        .field { min-width: 0; }
+        .field.wide { grid-column: 1 / -1; }
+
+        .field > label, .field-label {
+            display: block;
+            margin-bottom: 7px;
+            color: var(--muted);
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        input[type="number"], select {
+            width: 100%;
+            height: var(--control-height);
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            padding: 0 12px;
+            color: var(--text);
+            background: var(--surface-raised);
+        }
+
+        input[type="number"] { font-family: "Cascadia Code", monospace; }
+
+        .segment {
+            height: var(--control-height);
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .segment label {
+            display: grid;
+            place-items: center;
+            cursor: pointer;
+            color: var(--muted);
+            background: var(--surface-raised);
+            font-size: 12px;
+        }
+
+        .segment label + label { border-left: 1px solid var(--line); }
+        .segment input { position: absolute; opacity: 0; }
+        .segment label:has(input:checked) { color: #07130c; background: var(--signal); font-weight: 700; }
+
+        .form-actions {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-top: 8px;
+            padding-top: 22px;
+            border-top: 1px solid var(--line-soft);
+        }
+
+        .form-actions .primary { min-width: 132px; }
+        #commandResult { color: var(--muted); font: 12px "Cascadia Code", monospace; }
+        #commandResult.ok { color: var(--signal); }
+        #commandResult.error { color: var(--danger); }
+
+        .channels {
+            margin-bottom: 26px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid var(--line-soft);
+        }
+
+        .channel-list {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 7px;
+        }
+
+        .channel {
+            min-width: 0;
+            min-height: 54px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 11px;
+            text-align: left;
+        }
+
+        .channel strong, .channel span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .channel strong { white-space: nowrap; font-size: 12px; }
+        .channel span { color: var(--muted); font: 10px "Cascadia Code", monospace; }
+        .channel b { color: var(--signal); font: 10px "Cascadia Code", monospace; }
+        .channel-list > span { color: var(--muted); font: 11px "Cascadia Code", monospace; }
+
+        .lock-panel {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid var(--line-soft);
+        }
+
+        .lock-indicator {
+            width: 58px;
+            height: 58px;
+            display: grid;
+            place-items: center;
+            border: 1px solid var(--line);
+            border-radius: 50%;
+            color: var(--muted);
+            background: var(--surface);
+            font: 700 11px "Cascadia Code", monospace;
+        }
+
+        .lock-panel.locked .lock-indicator {
+            color: #07130c;
+            border-color: var(--signal);
+            background: var(--signal);
+            box-shadow: 0 0 24px rgba(86, 214, 139, 0.16);
+        }
+
+        .lock-copy strong { display: block; margin-bottom: 5px; font-size: 18px; }
+        .lock-copy span { color: var(--muted); font: 11px "Cascadia Code", monospace; }
+
+        .flags {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 5px;
+            margin: 24px 0;
+        }
+
+        .flag {
+            min-width: 0;
+            padding: 9px 3px;
+            border: 1px solid var(--line-soft);
+            border-radius: 3px;
+            color: #657169;
+            text-align: center;
+            font: 9px "Cascadia Code", monospace;
+        }
+
+        .flag.on { color: var(--signal); border-color: var(--signal-dim); background: rgba(86, 214, 139, 0.06); }
+
+        .metrics { border-top: 1px solid var(--line-soft); }
+        .metric {
+            min-height: 56px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 6px 16px;
+            padding: 9px 0;
+            border-bottom: 1px solid var(--line-soft);
+        }
+
+        .metric span { color: var(--muted); font-size: 12px; }
+        .metric strong { font: 15px "Cascadia Code", monospace; }
+        .metric strong.compact { font-size: 12px; text-align: right; }
+        .metric.block { grid-template-columns: 1fr; align-items: start; }
+        .metric-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .icon-button {
+            width: 30px;
+            min-height: 30px;
+            padding: 0;
+            display: grid;
+            place-items: center;
+            color: var(--cyan);
+            font: 20px/1 "Cascadia Code", monospace;
+        }
+        .telemetry-dump {
+            width: 100%;
+            margin: 0;
+            overflow-wrap: anywhere;
+            white-space: pre-wrap;
+            color: var(--text);
+            font: 11px/1.6 "Cascadia Code", monospace;
+        }
+        .metric.changed { animation: metric-flash 700ms ease-out; }
+        .metric.changed strong { animation: value-flash 700ms ease-out; }
+
+        .decoder-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 20;
+            visibility: hidden;
+            opacity: 0;
+            background: rgba(0, 0, 0, 0.58);
+            transition: opacity 180ms ease, visibility 180ms ease;
+        }
+
+        .pat-decoder {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: min(580px, calc(100% - 28px));
+            height: 100%;
+            overflow-y: auto;
+            padding: 24px;
+            border-left: 1px solid var(--line);
+            background: var(--surface);
+            transform: translateX(100%);
+            transition: transform 220ms ease;
+        }
+
+        body.decoder-open { overflow: hidden; }
+        body.decoder-open .decoder-backdrop { visibility: visible; opacity: 1; }
+        body.decoder-open .pat-decoder { transform: translateX(0); }
+
+        .decoder-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .decoder-head h2 { font-size: 18px; }
+        .decoder-head span { display: block; margin-top: 4px; color: var(--muted); font: 10px "Cascadia Code", monospace; }
+        .decoder-close { color: var(--muted); font-size: 18px; }
+        .decoder-section { padding: 20px 0; border-bottom: 1px solid var(--line-soft); }
+        .decoder-section h3 { margin: 0 0 12px; color: var(--muted); font-size: 11px; font-weight: 500; text-transform: uppercase; }
+        .decoder-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line-soft); }
+        .decoder-field { min-width: 0; padding: 11px; background: var(--surface-raised); }
+        .decoder-field span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; }
+        .decoder-field strong { overflow-wrap: anywhere; font: 12px "Cascadia Code", monospace; }
+        .decoder-good { color: var(--signal); }
+        .decoder-bad { color: var(--danger); }
+        .decoder-empty { padding: 28px 0; color: var(--muted); font: 12px/1.6 "Cascadia Code", monospace; }
+        .decoder-table-wrap { overflow-x: auto; }
+        .decoder-table { width: 100%; border-collapse: collapse; font: 12px "Cascadia Code", monospace; }
+        .decoder-table th, .decoder-table td { padding: 10px 8px; border-bottom: 1px solid var(--line-soft); text-align: left; }
+        .decoder-table th { color: var(--muted); font-size: 10px; font-weight: 500; text-transform: uppercase; }
+        .decoder-table td:last-child { color: var(--signal); }
+
+        .statistics-group {
+            margin-top: 30px;
+            padding-top: 26px;
+            border-top: 2px solid var(--line);
+        }
+
+        .statistics-group .section-head { margin-bottom: 8px; }
+
+        .meter {
+            grid-column: 1 / -1;
+            height: 6px;
+            overflow: hidden;
+            border-radius: 3px;
+            background: var(--surface-raised);
+        }
+
+        .meter-fill {
+            width: 0;
+            height: 100%;
+            border-radius: inherit;
+            background: var(--danger);
+            transition: width 320ms ease, background-color 320ms ease;
+        }
+
+        .meter-fill.low { background: var(--danger); }
+        .meter-fill.medium { background: var(--amber); }
+        .meter-fill.high { background: var(--signal); }
+
+        @keyframes metric-flash {
+            0% { background: rgba(229, 180, 84, 0.2); }
+            100% { background: transparent; }
+        }
+
+        @keyframes value-flash {
+            0% { color: var(--amber); }
+            100% { color: var(--text); }
+        }
+
+        .raw {
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid var(--line-soft);
+        }
+
+        .raw-head { display: flex; justify-content: space-between; margin-bottom: 10px; }
+        .raw-head span { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+        #rawStatus {
+            min-height: 72px;
+            margin: 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            color: #9eb5a6;
+            font: 10px/1.55 "Cascadia Code", monospace;
+        }
+
+        @media (max-width: 820px) {
+            header { height: auto; min-height: 68px; padding: 14px 18px; }
+            .brand { align-items: flex-start; flex-direction: column; gap: 3px; }
+            .hardware-bar { padding: 10px 18px; flex-wrap: wrap; }
+            .hardware-state { flex: 1 1 100%; }
+            main { grid-template-columns: 1fr; }
+            section { border-right: 0; border-bottom: 1px solid var(--line); }
+            section, aside { padding: 24px 18px; }
+        }
+
+        @media (max-width: 500px) {
+            .form-grid { grid-template-columns: 1fr; }
+            .field.wide, .form-actions { grid-column: auto; }
+            .form-actions { align-items: stretch; flex-direction: column; }
+            .channel-list { grid-template-columns: 1fr; }
+            .flags { grid-template-columns: repeat(3, 1fr); }
+            .connection span { display: none; }
+            .pat-decoder { width: 100%; padding: 20px 18px; }
+            .decoder-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Sat Snooper Control</h1>
-
-        <div class="info-section">
-            <h2>Tuner Status</h2>
-            <div id="tunerStatus">Loading status...</div>
+    <header>
+        <div class="brand">
+            <strong>SAT SNOOPER</strong>
+            <span>ESP32-S3 / DVB-S2 FRONTEND</span>
         </div>
-
-        <div class="control-section">
-            <h2>Tuner Actions</h2>
-            <div class="control-item">
-                <label for="tunerResetSwitch">Tuner Reset:</label>
-                <label class="switch">
-                    <input type="checkbox" id="tunerResetSwitch" onchange="setTunerReset()">
-                    <span class="slider"></span>
-                </label>
-                <label for="tunerPolarization">Polarization:</label>
-                <label class="switch">
-                    <input type="checkbox" id="tunerPolarization" onchange="setPolarization()">
-                    <span class="slider"></span>
-                </label>
-            </div>
-            <div class="control-item">
-                <button onclick="initializeTuner()">Initialize Tuner</button>
-            </div>
-            <div id="actionResult"></div>
+        <div class="connection" id="connectionState">
+            <i class="connection-dot"></i>
+            <span>API OFFLINE</span>
         </div>
+    </header>
 
-        <div class="control-section">
-            <h2>Tune Channel</h2>
-            <div class="control-item">
-                <label for="freq_mhz">Frequency (MHz):</label>
-                <input type="text" id="freq_mhz" value="10847">
-                <label for="sr">Symbol Rate (kSps):</label>
-                <input type="text" id="sr" value="22000">
-                <label for="pol">Pol.:</label>
-                <select id="pol">
-                    <option value="0" selected>V</option>
-                    <option value="1">H</option>
-                </select>
-            </div>
-            <div class="control-item">
-                <label for="delsys">Delivery System:</label>
-                <select id="delsys">
-                    <option value="5" selected>DVB-S</option>
-                    <option value="6">DVB-S2</option>
-                </select>
-                <label for="mod">Modulation:</label>
-                <select id="mod">
-                    <option value="0" selected>QPSK</option>
-                    <option value="9">8PSK</option>
-                </select>
-                <label for="fec">FEC:</label>
-                <select id="fec">
-                    <option value="0">NONE</option>
-                    <option value="1">1/2</option>
-                    <option value="2">2/3</option>
-                    <option value="3">3/4</option>
-                    <option value="3">3/5</option>
-                    <option value="4">4/5</option>
-                    <option value="5" selected>5/6</option>
-                    <option value="6">6/7</option>
-                    <option value="7">7/8</option>
-                    <option value="8">8/9</option>
-                    <option value="9">9/10</option>
-                </select>
-            </div>
-            <div class="control-item">
-                <label for="inv">Inversion:</label>
-                <select id="inv">
-                    <option value="0" selected>OFF</option>
-                    <option value="1">ON</option>
-                    <option value="2">AUTO</option>
-                </select>
-                <label for="pilot">Pilot:</label>
-                <select id="pilot">
-                    <option value="0" selected>OFF</option>
-                    <option value="1">ON</option>
-                    <option value="2">AUTO</option>
-                </select>
-                <label for="rolloff">Rolloff:</label>
-                <select id="rolloff">
-                    <option value="0" selected>0.35</option>
-                    <option value="1">0.20</option>
-                    <option value="2">0.25</option>
-                    <option value="3">AUTO</option>
-                </select>
-            </div>
-            <div class="control-item">
-                <button onclick="tuneChannel()">Tune</button>
-            </div>
-            <div id="tuneResult"></div>
+    <div class="hardware-bar">
+        <div class="hardware-state" id="hardwareState">
+            <i class="state-mark"></i>
+            <span>Tuner not initialized</span>
         </div>
+        <label class="switch-control">
+            RESET
+            <input type="checkbox" id="resetToggle" aria-label="Hold tuner in reset">
+        </label>
+        <button type="button" id="refreshButton">Refresh</button>
+        <button type="button" id="initButton">Initialize</button>
+    </div>
 
-        <div class="control-section">
-            <h2>Channel Presets</h2>
-            <div id="channelPresetsContainer">Loading presets...</div>
-            <div id="presetTuneResult"></div>
+    <main>
+        <section>
+            <div class="channels">
+                <div class="section-head">
+                    <h1>Channel Shortcuts</h1>
+                    <span id="channelCount">LOADING</span>
+                </div>
+                <div class="channel-list" id="channelList">
+                    <span>Loading chan.jsn...</span>
+                </div>
+            </div>
+
+            <div class="section-head">
+                <h1>Manual Tune</h1>
+                <span>UNIVERSAL Ku LNB</span>
+            </div>
+
+            <form id="tuneForm" class="form-grid">
+                <div class="field">
+                    <label for="frequency">RF frequency / MHz</label>
+                    <input id="frequency" name="frequency_mhz" type="number" min="10700" max="12750" value="10847" required>
+                </div>
+                <div class="field">
+                    <label for="symbolRate">Symbol rate / kSym/s</label>
+                    <input id="symbolRate" name="symbol_rate_ksps" type="number" min="1000" max="45000" value="22000" required>
+                </div>
+
+                <div class="field wide">
+                    <span class="field-label">Polarization</span>
+                    <div class="segment">
+                        <label><input type="radio" name="polarization" value="V" checked>Vertical / 13 V</label>
+                        <label><input type="radio" name="polarization" value="H">Horizontal / 18 V</label>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label for="delivery">Delivery system</label>
+                    <select id="delivery" name="delivery">
+                        <option>DVB-S</option>
+                        <option selected>DVB-S2</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="modulation">Modulation</label>
+                    <select id="modulation" name="modulation">
+                        <option>QPSK</option>
+                        <option selected>8PSK</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="fec">FEC</label>
+                    <select id="fec" name="fec">
+                        <option>AUTO</option><option>NONE</option><option>1/2</option><option>2/5</option>
+                        <option selected>2/3</option><option>3/5</option><option>3/4</option><option>4/5</option>
+                        <option>5/6</option><option>6/7</option><option>7/8</option><option>8/9</option><option>9/10</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="inversion">Spectral inversion</label>
+                    <select id="inversion" name="inversion">
+                        <option>OFF</option><option>ON</option><option selected>AUTO</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="pilot">Pilot</label>
+                    <select id="pilot" name="pilot">
+                        <option>OFF</option><option>ON</option><option selected>AUTO</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="rolloff">Rolloff</label>
+                    <select id="rolloff" name="rolloff">
+                        <option selected>0.35</option><option>0.25</option><option>0.20</option>
+                    </select>
+                </div>
+
+                <div class="form-actions">
+                    <button class="primary" id="tuneButton" type="submit">Tune</button>
+                    <output id="commandResult">Idle</output>
+                </div>
+            </form>
+        </section>
+
+        <aside>
+            <div class="section-head">
+                <h2>Frontend Status</h2>
+                <span id="lastUpdate">NEVER</span>
+            </div>
+
+            <div class="lock-panel" id="lockPanel">
+                <div class="lock-indicator">NO</div>
+                <div class="lock-copy">
+                    <strong>No lock</strong>
+                    <span id="frontendMeta">FLAGS 0x00 / LNB OFF</span>
+                </div>
+            </div>
+
+            <div class="flags" id="flags">
+                <div class="flag" data-flag="signal">SIGNAL</div>
+                <div class="flag" data-flag="carrier">CARRIER</div>
+                <div class="flag" data-flag="viterbi">VITERBI</div>
+                <div class="flag" data-flag="sync">SYNC</div>
+                <div class="flag" data-flag="lock">LOCK</div>
+            </div>
+
+            <div class="metrics">
+                <div class="metric" id="strengthMetric">
+                    <span>Signal strength</span><strong id="strength">N/A</strong>
+                    <div class="meter" role="meter" aria-label="Signal strength" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="meter-fill" id="strengthBar"></div></div>
+                </div>
+                <div class="metric" id="snrMetric">
+                    <span>SNR quality</span><strong id="snr">N/A</strong>
+                    <div class="meter" role="meter" aria-label="SNR quality" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="meter-fill" id="snrBar"></div></div>
+                </div>
+                <div class="metric" id="berMetric"><span>BER register</span><strong id="ber">N/A</strong></div>
+                <div class="metric" id="uncorrectedMetric"><span>Uncorrected blocks</span><strong id="uncorrected">N/A</strong></div>
+                <div class="metric" id="esnoMetric"><span>Estimated E<sub>s</sub>/N<sub>0</sub></span><strong id="esno">N/A</strong></div>
+                <div class="metric" id="acquiredMetric"><span>Acquired mode</span><strong class="compact" id="acquired">N/A</strong></div>
+                <div class="metric" id="lnbReadyMetric"><span>LNB ready</span><strong id="lnbReady">N/A</strong></div>
+                <div class="metric" id="firmwareRunningMetric"><span>Firmware state</span><strong id="firmwareRunning">N/A</strong></div>
+                <div class="metric" id="firmwareVersionMetric"><span>Firmware version</span><strong id="firmwareVersion">N/A</strong></div>
+                <div class="metric" id="chipIdMetric"><span>Chip ID</span><strong id="chipId">N/A</strong></div>
+            </div>
+
+            <div class="statistics-group">
+                <div class="section-head">
+                    <h2>FPGA Stream</h2>
+                    <span>10 HZ TELEMETRY</span>
+                </div>
+                <div class="metrics">
+                    <div class="metric" id="fpgaSyncMetric"><span>Sync count</span><strong id="fpgaSync">N/A</strong></div>
+                    <div class="metric" id="fpgaDataBytesMetric"><span>Valid data received</span><strong id="fpgaDataBytes">N/A</strong></div>
+                    <div class="metric" id="fpgaSyncErrorsMetric"><span>Sync-byte errors</span><strong id="fpgaSyncErrors">N/A</strong></div>
+                    <div class="metric block" id="fpgaPidsMetric"><span>PIDs seen in last report cycle</span><strong class="compact" id="fpgaPids">N/A</strong></div>
+                    <div class="metric block" id="fpgaPatMetric">
+                        <div class="metric-title-row">
+                            <span>Last PAT packet</span>
+                            <button class="icon-button" id="patDecoderOpen" type="button" title="Open PAT decoder" aria-label="Open PAT decoder">»</button>
+                        </div>
+                        <pre class="telemetry-dump" id="fpgaPat">N/A</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="raw">
+                <div class="raw-head"><span>Last API frame</span><span>JSON</span></div>
+                <pre id="rawStatus">{}</pre>
+            </div>
+        </aside>
+    </main>
+
+    <div class="decoder-backdrop" id="patDecoderBackdrop">
+        <div class="pat-decoder" role="dialog" aria-modal="true" aria-labelledby="patDecoderTitle">
+            <div class="decoder-head">
+                <div>
+                    <h2 id="patDecoderTitle">PAT Decoder</h2>
+                    <span>MPEG-TS PROGRAM ASSOCIATION TABLE</span>
+                </div>
+                <button class="icon-button decoder-close" id="patDecoderClose" type="button" title="Close PAT decoder" aria-label="Close PAT decoder">×</button>
+            </div>
+            <div id="patDecoderBody" class="decoder-empty">No PAT packet available.</div>
         </div>
-
     </div>
 
     <script>
-        async function getTunerStatus() {
-            const statusEl = document.getElementById('tunerStatus');
-            // statusEl.textContent = 'Fetching status...'; 
-            try {
-                const response = await fetch('/api/tuner/status');
-                if (!response.ok) {
-                    statusEl.innerHTML = `<div class="error">Error fetching status: HTTP ${response.status}</div>`;
-                    console.error(`HTTP error! status: ${response.status}`);
-                    return;
-                }
-                const data = await response.json();
-                statusEl.innerHTML = ''; // Clear previous content
-
-                const buttonsContainer = document.createElement('div');
-                buttonsContainer.style.display = 'flex';
-                buttonsContainer.style.flexWrap = 'wrap';
-                buttonsContainer.style.gap = '8px'; // Spacing between buttons
-                buttonsContainer.style.marginBottom = '15px'; // Space below the button row
-
-                const otherInfoContainer = document.createElement('div');
-                let hasButtons = false;
-                let hasOtherInfo = false;
-
-                for (const key in data) {
-                    if (data.hasOwnProperty(key)) {
-                        if (key.startsWith('has_')) {
-                            hasButtons = true;
-                            const statusButton = document.createElement('span');
-                            statusButton.className = 'status-button';
-                            statusButton.classList.add(data[key] ? 'status-green' : 'status-red');
-                            const statusName = key.replace('has_', '').replace(/_/g, ' ').toUpperCase();
-                            statusButton.textContent = statusName;
-                            buttonsContainer.appendChild(statusButton);
-                        } else {
-                            hasOtherInfo = true;
-                            const itemDiv = document.createElement('div');
-                            itemDiv.className = 'info-item'; 
-                            
-                            const labelSpan = document.createElement('label');
-                            labelSpan.textContent = `${key.replace(/_/g, ' ').toUpperCase()}:`;
-                            
-                            const valueSpan = document.createElement('span');
-                            valueSpan.textContent = data[key];
-                            
-                            itemDiv.appendChild(labelSpan);
-                            itemDiv.appendChild(valueSpan);
-                            otherInfoContainer.appendChild(itemDiv);
-                        }
-                    }
-                }
-
-                if (hasButtons) {
-                    statusEl.appendChild(buttonsContainer);
-                }
-                if (hasOtherInfo) {
-                    statusEl.appendChild(otherInfoContainer);
-                }
-                // If statusEl remains empty (e.g. data is empty and no error), 
-                // it will just be blank, which is acceptable.
-
-            } catch (error) {
-                statusEl.innerHTML = `<div class="error">Error fetching status: ${error.message}</div>`;
-                console.error('Error fetching status:', error);
-            }
-        }
-
-        async function tuneChannel() {
-            const resultEl = document.getElementById('tuneResult');
-            resultEl.textContent = '';
-            resultEl.className = '';
-
-            const tuneParams = {
-                freq_mhz: parseInt(document.getElementById('freq_mhz').value),
-                sr_ksps: parseInt(document.getElementById('sr').value),
-                pol: parseInt(document.getElementById('pol').value),
-                fec: parseInt(document.getElementById('fec').value),
-                inv: parseInt(document.getElementById('inv').value),
-                delsys: parseInt(document.getElementById('delsys').value),
-                mod: parseInt(document.getElementById('mod').value),
-                pilot: parseInt(document.getElementById('pilot').value),
-                rolloff: parseInt(document.getElementById('rolloff').value)
-            };
-            await executeTune(tuneParams, resultEl);
-        }
-
-        async function executeTune(tuneParams, resultElement) {
-            resultElement.textContent = 'Tuning...';
-            resultElement.className = '';
-            try {
-                const response = await fetch('/api/tuner/tune', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(tuneParams),
-                });
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    resultElement.textContent = `Error tuning: ${data.message || response.status}`;
-                    resultElement.className = 'error';
-                    throw new Error(`HTTP error! status: ${response.status}, message: ${data.message}`);
-                }
-                
-                resultElement.textContent = `Tune command sent successfully: ${data.message}`;
-                resultElement.className = 'success';
-                setTimeout(getTunerStatus, 500); 
-                setTimeout(getPolarizationState, 500); 
-            } catch (error) {
-                if (!resultElement.textContent || resultElement.textContent === 'Tuning...') { 
-                    resultElement.textContent = `Error tuning: ${error.message}`;
-                    resultElement.className = 'error';
-                }
-                console.error('Error tuning channel:', error);
-            }
-        }
-
-        async function getTunerResetState() {
-            const resetSwitch = document.getElementById('tunerResetSwitch');
-            const resultEl = document.getElementById('actionResult');
-            try {
-                const response = await fetch('/api/tuner/reset');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                resetSwitch.checked = data.reset_active; // Assuming the API returns { "reset_active": true/false }
-            } catch (error) {
-                resultEl.textContent = `Error getting reset state: ${error.message}`;
-                resultEl.className = 'error';
-                console.error('Error getting reset state:', error);
-            }
-        }
-
-        async function setTunerReset() {
-            const resetSwitch = document.getElementById('tunerResetSwitch');
-            const resultEl = document.getElementById('actionResult');
-            const isActive = resetSwitch.checked;
-            resultEl.textContent = 'Setting reset state...';
-            resultEl.className = '';
-
-            try {
-                const response = await fetch('/api/tuner/reset', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ reset: isActive }), // Assuming API expects { "reset": true/false }
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    resultEl.textContent = `Error setting reset: ${data.message || response.status}`;
-                    resultEl.className = 'error';
-                    throw new Error(`HTTP error! status: ${response.status}, message: ${data.message}`);
-                }
-                resultEl.textContent = `Reset state set to ${isActive ? 'ON' : 'OFF'}: ${data.message || 'Success'}`;
-                resultEl.className = 'success';
-            } catch (error) {
-                if (!resultEl.textContent || resultEl.textContent === 'Setting reset state...') {
-                    resultEl.textContent = `Error setting reset: ${error.message}`;
-                    resultEl.className = 'error';
-                }
-                console.error('Error setting reset state:', error);
-                resetSwitch.checked = !isActive; 
-            }
-        }
-
-        async function getPolarizationState() {
-            const polSwitch = document.getElementById('tunerPolarization');
-            const resultEl = document.getElementById('actionResult');
-            try {
-                const response = await fetch('/api/tuner/polarization');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                // Assuming API returns { "polarization": "H" or "V" or "OFF" }
-                if (data.polarization === "H") {
-                    polSwitch.checked = true;
-                } else {
-                    polSwitch.checked = false; // Default to V (unchecked) if not H or if OFF
-                }
-            } catch (error) {
-                resultEl.textContent = `Error getting polarization state: ${error.message}`;
-                resultEl.className = 'error';
-                console.error('Error getting polarization state:', error);
-            }
-        }
-
-        async function setPolarization() {
-            const polSwitch = document.getElementById('tunerPolarization');
-            const resultEl = document.getElementById('actionResult');
-            const isChecked = polSwitch.checked;
-            const polarizationValue = isChecked ? "H" : "V"; // H for checked (Horizontal), V for unchecked (Vertical)
-            
-            await executeSetPolarization(polarizationValue, resultEl);
-        }
-
-        async function executeSetPolarization(polarizationValue, resultElement) {
-            resultElement.textContent = 'Setting polarization state...';
-            resultElement.className = '';
-
-            try {
-                const response = await fetch('/api/tuner/polarization', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ polarization: polarizationValue }),
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    resultElement.textContent = `Error setting polarization: ${data.message || response.status}`;
-                    resultElement.className = 'error';
-                    throw new Error(`HTTP error! status: ${response.status}, message: ${data.message}`);
-                }
-                resultElement.textContent = `Polarization set to ${polarizationValue}: ${data.message || 'Success'}`;
-                resultElement.className = 'success';
-                // Update the switch state after successful API call
-                const polSwitch = document.getElementById('tunerPolarization');
-                if (polarizationValue === "H") {
-                    polSwitch.checked = true;
-                } else {
-                    polSwitch.checked = false;
-                }
-            } catch (error) {
-                if (!resultElement.textContent || resultElement.textContent === 'Setting polarization state...') {
-                    resultElement.textContent = `Error setting polarization: ${error.message}`;
-                    resultElement.className = 'error';
-                }
-                console.error('Error setting polarization state:', error);
-                // Optionally revert switch on error, though getPolarizationState on load should correct it.
-            }
-        }
-
-        async function initializeTuner() {
-            const resultEl = document.getElementById('actionResult');
-            resultEl.textContent = 'Initializing tuner...';
-            resultEl.className = '';
-
-            try {
-                const response = await fetch('/api/tuner/init', {
-                    method: 'POST', // Assuming POST, adjust if GET or other
-                    headers: {
-                        'Content-Type': 'application/json', // If sending any body, even empty
-                    }
-                });
-                const data = await response.json(); // Assuming API returns JSON
-
-                if (!response.ok) {
-                    resultEl.textContent = `Error initializing tuner: ${data.message || response.status}`;
-                    resultEl.className = 'error';
-                    throw new Error(`HTTP error! status: ${response.status}, message: ${data.message}`);
-                }
-                if (!data.success) {
-                    resultEl.textContent = `Error initializing tuner: ${data.message || response.status}`;
-                    resultEl.className = 'error';
-                    throw new Error(`Failed: ${response.status}, message: ${data.message}`);
-                }
-                
-                resultEl.textContent = `Tuner initialization command sent: ${data.message || 'Success'}`;
-                resultEl.className = 'success';
-                // Refresh status after attempting to initialize
-                setTimeout(getTunerStatus, 500); 
-                setTimeout(getPolarizationState, 500); 
-            } catch (error) {
-                 if (!resultEl.textContent || resultEl.textContent === 'Initializing tuner...') {
-                    resultEl.textContent = `Error initializing tuner: ${error.message}`;
-                    resultEl.className = 'error';
-                }
-                console.error('Error initializing tuner:', error);
-            }
-        }
-
-        async function loadChannelPresets() {
-            const container = document.getElementById('channelPresetsContainer');
-            const resultEl = document.getElementById('presetTuneResult');
-            try {
-                const response = await fetch('chan.jsn');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const presets = await response.json();
-                container.innerHTML = ''; // Clear loading message
-
-                presets.forEach(preset => {
-                    const presetDiv = document.createElement('div');
-                    presetDiv.className = 'control-item';
-
-                    const labelSpan = document.createElement('span');
-                    labelSpan.textContent = preset.displayName;
-                    labelSpan.style.marginRight = '10px';
-                    labelSpan.style.flexGrow = '1';
-
-                    const tuneButton = document.createElement('button');
-                    tuneButton.textContent = 'Tune';
-                    tuneButton.onclick = async () => {
-                        resultEl.textContent = ''; 
-                        resultEl.className = '';
-                        
-                        // 2. Set tune parameters in the main form (optional, for visibility)
-                        document.getElementById('freq_mhz').value = preset.freqMHz;
-                        document.getElementById('sr').value = preset.tuneParams.s;
-                        document.getElementById('pol').value = (preset.polarization == "H") ? 1 : 0;
-                        document.getElementById('fec').value = preset.tuneParams.fec;
-                        document.getElementById('inv').value = preset.tuneParams.inv;
-                        document.getElementById('delsys').value = preset.tuneParams.delsys;
-                        document.getElementById('mod').value = preset.tuneParams.mod;
-                        document.getElementById('pilot').value = preset.tuneParams.pilot;
-                        document.getElementById('rolloff').value = preset.tuneParams.rolloff;
-
-                        // 3. Tune Channel
-                        const tunePayload = {
-                            freq_mhz: preset.freqMHz,
-                            sr_ksps: preset.tuneParams.s,
-                            pol: (preset.polarization == "H") ? 1 : 0,
-                            fec: preset.tuneParams.fec,
-                            inv: preset.tuneParams.inv,
-                            delsys: preset.tuneParams.delsys,
-                            mod: preset.tuneParams.mod,
-                            pilot: preset.tuneParams.pilot,
-                            rolloff: preset.tuneParams.rolloff
-                        };
-                        await executeTune(tunePayload, resultEl);
-                    };
-
-                    presetDiv.appendChild(labelSpan);
-                    presetDiv.appendChild(tuneButton);
-                    container.appendChild(presetDiv);
-                });
-
-            } catch (error) {
-                container.innerHTML = `<div class="error">Error loading presets: ${error.message}</div>`;
-                console.error('Error loading channel presets:', error);
-            }
-        }
-
-        // Initial calls on page load
-        window.onload = () => {
-            getTunerStatus();
-            getTunerResetState();
-            getPolarizationState();
-            loadChannelPresets();
-            setInterval(getTunerStatus, 5000); // Refresh status every 5 seconds
+        const API = "/api/v1/tuner";
+        const elements = {
+            connection: document.getElementById("connectionState"),
+            hardware: document.getElementById("hardwareState"),
+            init: document.getElementById("initButton"),
+            refresh: document.getElementById("refreshButton"),
+            reset: document.getElementById("resetToggle"),
+            form: document.getElementById("tuneForm"),
+            tune: document.getElementById("tuneButton"),
+            result: document.getElementById("commandResult"),
+            lockPanel: document.getElementById("lockPanel"),
+            meta: document.getElementById("frontendMeta"),
+            updated: document.getElementById("lastUpdate"),
+            raw: document.getElementById("rawStatus"),
+            channels: document.getElementById("channelList"),
+            channelCount: document.getElementById("channelCount"),
+            patDecoderOpen: document.getElementById("patDecoderOpen"),
+            patDecoderClose: document.getElementById("patDecoderClose"),
+            patDecoderBackdrop: document.getElementById("patDecoderBackdrop"),
+            patDecoderBody: document.getElementById("patDecoderBody")
         };
+
+        let latestPatHex = null;
+
+        const legacyValues = {
+            delivery: { 5: "DVB-S", 6: "DVB-S2" },
+            modulation: { 0: "QPSK", 9: "8PSK" },
+            fec: { 0: "NONE", 1: "1/2", 2: "2/3", 3: "3/4", 4: "4/5", 5: "5/6", 6: "6/7", 7: "7/8", 8: "8/9", 9: "AUTO", 10: "3/5", 11: "9/10", 12: "2/5" },
+            inversion: { 0: "OFF", 1: "ON", 2: "AUTO" },
+            pilot: { 0: "ON", 1: "OFF", 2: "AUTO" },
+            rolloff: { 0: "0.35", 1: "0.20", 2: "0.25", 3: "AUTO" }
+        };
+
+        function normalizeChannel(channel, index) {
+            const pick = (modern, legacy, fallback) => channel[modern] ?? channel[legacy] ?? fallback;
+            const map = (group, value, fallback) => typeof value === "number" ? legacyValues[group][value] ?? fallback : value ?? fallback;
+            const polarization = pick("polarization", "pol", "V");
+            return {
+                name: channel.name || channel.title || `Channel ${index + 1}`,
+                frequency_mhz: Number(pick("frequency_mhz", "freq_mhz", 0)),
+                symbol_rate_ksps: Number(pick("symbol_rate_ksps", "sr_ksps", 0)),
+                polarization: typeof polarization === "number" ? (polarization === 1 ? "H" : "V") : polarization,
+                delivery: map("delivery", pick("delivery", "delsys", "DVB-S2"), "DVB-S2"),
+                modulation: map("modulation", pick("modulation", "mod", "QPSK"), "QPSK"),
+                fec: map("fec", channel.fec, "AUTO"),
+                inversion: map("inversion", pick("inversion", "inv", "AUTO"), "AUTO"),
+                pilot: map("pilot", channel.pilot, "AUTO"),
+                rolloff: map("rolloff", channel.rolloff, "0.35") === "AUTO" ? "0.35" : map("rolloff", channel.rolloff, "0.35")
+            };
+        }
+
+        function loadChannel(channel) {
+            for (const [name, value] of Object.entries(channel)) {
+                const control = elements.form.elements.namedItem(name);
+                if (!control || name === "name") continue;
+                if (control instanceof RadioNodeList) control.value = value;
+                else control.value = value;
+            }
+            setCommand(`${channel.name} loaded`, "ok");
+            elements.tune.focus();
+        }
+
+        async function loadChannels() {
+            try {
+                const response = await fetch("/chan.jsn", { cache: "no-store" });
+                if (!response.ok) throw new Error(`http_${response.status}`);
+                const source = await response.json();
+                const channels = (Array.isArray(source) ? source : source.channels || []).map(normalizeChannel);
+                elements.channels.replaceChildren();
+                channels.forEach(channel => {
+                    const button = document.createElement("button");
+                    const copy = document.createElement("span");
+                    const name = document.createElement("strong");
+                    const details = document.createElement("span");
+                    const action = document.createElement("b");
+                    button.type = "button";
+                    button.className = "channel";
+                    name.textContent = channel.name;
+                    details.textContent = `${channel.frequency_mhz} MHz / ${channel.symbol_rate_ksps} / ${channel.polarization}`;
+                    action.textContent = "LOAD";
+                    copy.append(name, document.createElement("br"), details);
+                    button.append(copy, action);
+                    button.addEventListener("click", () => loadChannel(channel));
+                    elements.channels.appendChild(button);
+                });
+                if (!channels.length) elements.channels.innerHTML = "<span>No channels configured</span>";
+                elements.channelCount.textContent = `${channels.length} CHANNEL${channels.length === 1 ? "" : "S"}`;
+            } catch (error) {
+                elements.channels.innerHTML = `<span>chan.jsn unavailable: ${error.message}</span>`;
+                elements.channelCount.textContent = "ERROR";
+            }
+        }
+
+        async function api(path = "", options = {}) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 2000);
+            try {
+                const response = await fetch(API + path, {
+                    ...options,
+                    signal: controller.signal,
+                    headers: options.body ? { "Content-Type": "application/json" } : undefined
+                });
+                const body = await response.json();
+                if (!response.ok) throw new Error(body.error || `http_${response.status}`);
+                return body;
+            } finally {
+                clearTimeout(timeout);
+            }
+        }
+
+        function setCommand(message, state = "") {
+            elements.result.textContent = message;
+            elements.result.className = state;
+        }
+
+        const previousMetrics = {};
+
+        function flashOnChange(name, value) {
+            const row = document.getElementById(`${name}Metric`);
+            if (Object.hasOwn(previousMetrics, name) && previousMetrics[name] !== value) {
+                row.classList.remove("changed");
+                void row.offsetWidth;
+                row.classList.add("changed");
+            }
+            previousMetrics[name] = value;
+        }
+
+        function renderPercentMetric(name, value) {
+            const output = document.getElementById(name);
+            const bar = document.getElementById(`${name}Bar`);
+            const meter = bar.parentElement;
+            const available = value !== undefined && value !== null;
+            const percent = available ? Math.min(100, Math.max(0, value * 100 / 65535)) : 0;
+            output.textContent = available ? `${percent.toFixed(1)}% (${value} raw)` : "N/A";
+            bar.style.width = `${percent}%`;
+            bar.className = `meter-fill ${percent < 35 ? "low" : percent < 65 ? "medium" : "high"}`;
+            meter.setAttribute("aria-valuenow", percent.toFixed(1));
+            flashOnChange(name, value);
+        }
+
+        function renderCounter(name, value, unit) {
+            document.getElementById(name).textContent = value === undefined || value === null
+                ? "N/A"
+                : `${value.toLocaleString()} ${unit}`;
+            flashOnChange(name, value);
+        }
+
+        function renderDiagnostic(name, value) {
+            document.getElementById(name).textContent = value === undefined || value === null ? "N/A" : value;
+            flashOnChange(name, value);
+        }
+
+        function formatPat(hex) {
+            if (!hex) return null;
+            const bytes = hex.match(/.{2}/g) || [];
+            const lines = [];
+            for (let index = 0; index < bytes.length; index += 16) {
+                lines.push(bytes.slice(index, index + 16).join(" ").toUpperCase());
+            }
+            return lines.join("\n");
+        }
+
+        function crc32Mpeg(bytes) {
+            let crc = 0xffffffff;
+            for (const byte of bytes) {
+                crc = (crc ^ (byte << 24)) >>> 0;
+                for (let bit = 0; bit < 8; bit++) {
+                    crc = crc & 0x80000000
+                        ? ((crc << 1) ^ 0x04c11db7) >>> 0
+                        : (crc << 1) >>> 0;
+                }
+            }
+            return crc >>> 0;
+        }
+
+        function decodePat(hex) {
+            const normalized = typeof hex === "string" ? hex.replace(/\s/g, "").toUpperCase() : "";
+            if (!/^[0-9A-F]{376}$/.test(normalized)) throw new Error("A complete 188-byte PAT packet is required.");
+            const bytes = Uint8Array.from(normalized.match(/.{2}/g), value => parseInt(value, 16));
+            if (bytes[0] !== 0x47) throw new Error("Invalid MPEG-TS sync byte.");
+
+            const payloadStart = Boolean(bytes[1] & 0x40);
+            const adaptationControl = (bytes[3] >> 4) & 0x03;
+            let offset = 4;
+            if (adaptationControl === 0) throw new Error("Reserved adaptation-field control value.");
+            if (adaptationControl & 0x02) {
+                offset += 1 + bytes[offset];
+                if (offset > bytes.length) throw new Error("Adaptation field extends beyond the packet.");
+            }
+            if (!(adaptationControl & 0x01)) throw new Error("Packet does not contain a payload.");
+            if (payloadStart) {
+                offset += 1 + bytes[offset];
+                if (offset >= bytes.length) throw new Error("Pointer field extends beyond the packet.");
+            }
+
+            if (offset + 8 > bytes.length) throw new Error("PAT section header is incomplete.");
+            const sectionLength = ((bytes[offset + 1] & 0x0f) << 8) | bytes[offset + 2];
+            const sectionEnd = offset + 3 + sectionLength;
+            if (sectionEnd > bytes.length || sectionLength < 9) throw new Error("PAT section length is invalid.");
+            const entriesEnd = sectionEnd - 4;
+            if ((entriesEnd - (offset + 8)) % 4 !== 0) throw new Error("PAT program loop is misaligned.");
+
+            const programs = [];
+            for (let index = offset + 8; index < entriesEnd; index += 4) {
+                const programNumber = (bytes[index] << 8) | bytes[index + 1];
+                programs.push({
+                    programNumber,
+                    pid: ((bytes[index + 2] & 0x1f) << 8) | bytes[index + 3],
+                    type: programNumber === 0 ? "Network" : "Program"
+                });
+            }
+
+            const transmittedCrc = ((bytes[entriesEnd] << 24) | (bytes[entriesEnd + 1] << 16) |
+                (bytes[entriesEnd + 2] << 8) | bytes[entriesEnd + 3]) >>> 0;
+            return {
+                transport: {
+                    pid: ((bytes[1] & 0x1f) << 8) | bytes[2],
+                    payloadStart,
+                    transportError: Boolean(bytes[1] & 0x80),
+                    continuity: bytes[3] & 0x0f,
+                    adaptationControl
+                },
+                section: {
+                    tableId: bytes[offset],
+                    sectionLength,
+                    transportStreamId: (bytes[offset + 3] << 8) | bytes[offset + 4],
+                    version: (bytes[offset + 5] >> 1) & 0x1f,
+                    current: Boolean(bytes[offset + 5] & 0x01),
+                    sectionNumber: bytes[offset + 6],
+                    lastSectionNumber: bytes[offset + 7],
+                    transmittedCrc,
+                    crcValid: crc32Mpeg(bytes.slice(offset, sectionEnd)) === 0
+                },
+                programs
+            };
+        }
+
+        function hexValue(value, width = 4) {
+            return `0x${value.toString(16).padStart(width, "0").toUpperCase()}`;
+        }
+
+        function renderPatDecoder() {
+            try {
+                const decoded = decodePat(latestPatHex);
+                const fields = (items) => items.map(([label, value, state = ""]) =>
+                    `<div class="decoder-field"><span>${label}</span><strong class="${state}">${value}</strong></div>`).join("");
+                const programRows = decoded.programs.length
+                    ? decoded.programs.map(program => `<tr><td>${program.type}</td><td>${program.programNumber}</td><td>${hexValue(program.pid)}</td></tr>`).join("")
+                    : `<tr><td colspan="3">No program mappings</td></tr>`;
+                elements.patDecoderBody.className = "";
+                elements.patDecoderBody.innerHTML = `
+                    <div class="decoder-section">
+                        <h3>Transport packet</h3>
+                        <div class="decoder-grid">${fields([
+                            ["PID", hexValue(decoded.transport.pid)],
+                            ["Payload start", decoded.transport.payloadStart ? "YES" : "NO"],
+                            ["Transport error", decoded.transport.transportError ? "SET" : "CLEAR", decoded.transport.transportError ? "decoder-bad" : "decoder-good"],
+                            ["Continuity counter", decoded.transport.continuity],
+                            ["Adaptation control", decoded.transport.adaptationControl]
+                        ])}</div>
+                    </div>
+                    <div class="decoder-section">
+                        <h3>Table section</h3>
+                        <div class="decoder-grid">${fields([
+                            ["Table ID", hexValue(decoded.section.tableId, 2)],
+                            ["Section length", `${decoded.section.sectionLength} bytes`],
+                            ["Transport stream ID", hexValue(decoded.section.transportStreamId)],
+                            ["Version", decoded.section.version],
+                            ["Current / next", decoded.section.current ? "CURRENT" : "NEXT"],
+                            ["Section", `${decoded.section.sectionNumber} / ${decoded.section.lastSectionNumber}`],
+                            ["CRC-32/MPEG-2", hexValue(decoded.section.transmittedCrc, 8), decoded.section.crcValid ? "decoder-good" : "decoder-bad"],
+                            ["CRC status", decoded.section.crcValid ? "VALID" : "INVALID", decoded.section.crcValid ? "decoder-good" : "decoder-bad"]
+                        ])}</div>
+                    </div>
+                    <div class="decoder-section">
+                        <h3>Program mappings</h3>
+                        <div class="decoder-table-wrap"><table class="decoder-table">
+                            <thead><tr><th>Type</th><th>Program</th><th>PID</th></tr></thead>
+                            <tbody>${programRows}</tbody>
+                        </table></div>
+                    </div>`;
+            } catch (error) {
+                elements.patDecoderBody.className = "decoder-empty";
+                elements.patDecoderBody.textContent = error.message;
+            }
+        }
+
+        function openPatDecoder() {
+            renderPatDecoder();
+            document.body.classList.add("decoder-open");
+            elements.patDecoderClose.focus();
+        }
+
+        function closePatDecoder() {
+            document.body.classList.remove("decoder-open");
+            elements.patDecoderOpen.focus();
+        }
+
+        function renderStatus(status) {
+            elements.connection.classList.add("online");
+            elements.connection.querySelector("span").textContent = "API ONLINE";
+            elements.hardware.classList.toggle("ready", status.initialized);
+            elements.hardware.querySelector("span").textContent = status.initialized ? "Tuner initialized" : "Tuner not initialized";
+            elements.reset.checked = status.reset;
+
+            elements.lockPanel.classList.toggle("locked", status.lock);
+            elements.lockPanel.querySelector(".lock-indicator").textContent = status.lock ? "YES" : "NO";
+            elements.lockPanel.querySelector("strong").textContent = status.lock ? "Frontend locked" : "No lock";
+            elements.meta.textContent = `FLAGS 0x${status.flags.toString(16).padStart(2, "0").toUpperCase()} / LNB ${status.polarization}`;
+
+            document.querySelectorAll("[data-flag]").forEach(item => {
+                item.classList.toggle("on", Boolean(status[item.dataset.flag]));
+            });
+            renderPercentMetric("strength", status.strength);
+            renderPercentMetric("snr", status.snr);
+            renderCounter("ber", status.ber, status.ber === 1 ? "error" : "errors");
+            renderCounter("uncorrected", status.uncorrected_blocks, status.uncorrected_blocks === 1 ? "block" : "blocks");
+            renderDiagnostic("esno", status.esno_db === undefined || status.esno_db === null ? null : `${status.esno_db.toFixed(1)} dB`);
+            renderDiagnostic("acquired", status.acquired_delivery && status.acquired_modulation && status.acquired_fec
+                ? `${status.acquired_delivery} / ${status.acquired_modulation} / ${status.acquired_fec} / PILOT ${status.acquired_pilot}`
+                : null);
+            renderDiagnostic("lnbReady", status.lnb_ready === null || status.lnb_ready === undefined ? null : status.lnb_ready ? "READY" : "NOT READY");
+            renderDiagnostic("firmwareRunning", status.firmware_running === null || status.firmware_running === undefined ? null : status.firmware_running ? "RUNNING" : "STOPPED");
+            renderDiagnostic("firmwareVersion", status.firmware_version);
+            renderDiagnostic("chipId", status.chip_id);
+            const fpgaStatistics = status.fpga_statistics ?? {};
+            renderCounter("fpgaSync", fpgaStatistics.sync_count, fpgaStatistics.sync_count === 1 ? "sync" : "syncs");
+            renderCounter("fpgaDataBytes", fpgaStatistics.data_bytes_received, "bytes");
+            renderCounter("fpgaSyncErrors", fpgaStatistics.sync_byte_errors, fpgaStatistics.sync_byte_errors === 1 ? "error" : "errors");
+            const pidReport = status.fpga_pid_report ?? {};
+            const pidText = Array.isArray(pidReport.pids)
+                ? `${pidReport.pids.map(pid => pid.toString(16).padStart(4, "0").toUpperCase()).join(" · ") || "NONE"}${pidReport.overflow ? " · TRUNCATED" : ""}`
+                : null;
+            renderDiagnostic("fpgaPids", pidText);
+            latestPatHex = status.fpga_pat?.hex ?? null;
+            renderDiagnostic("fpgaPat", formatPat(latestPatHex));
+            if (document.body.classList.contains("decoder-open")) renderPatDecoder();
+            elements.updated.textContent = new Date().toLocaleTimeString([], { hour12: false });
+            elements.raw.textContent = JSON.stringify(status, null, 2);
+        }
+
+        let statusRequestInFlight = false;
+
+        async function refreshStatus() {
+            if (statusRequestInFlight) return;
+            statusRequestInFlight = true;
+            try {
+                renderStatus(await api());
+            } catch (error) {
+                elements.connection.classList.remove("online");
+                elements.connection.querySelector("span").textContent = "API OFFLINE";
+                elements.updated.textContent = error.name === "AbortError" ? "TIMEOUT" : "ERROR";
+            } finally {
+                statusRequestInFlight = false;
+            }
+        }
+
+        elements.init.addEventListener("click", async () => {
+            elements.init.disabled = true;
+            setCommand("Initializing...");
+            try {
+                await api("/init", { method: "POST" });
+                setCommand("Initialization complete", "ok");
+                await refreshStatus();
+            } catch (error) {
+                setCommand(`Init failed: ${error.message}`, "error");
+            } finally {
+                elements.init.disabled = false;
+            }
+        });
+
+        elements.reset.addEventListener("change", async () => {
+            elements.reset.disabled = true;
+            try {
+                await api("/reset", { method: "POST", body: JSON.stringify({ active: elements.reset.checked }) });
+                setCommand(elements.reset.checked ? "Reset asserted" : "Reset released", "ok");
+                await refreshStatus();
+            } catch (error) {
+                setCommand(`Reset failed: ${error.message}`, "error");
+                await refreshStatus();
+            } finally {
+                elements.reset.disabled = false;
+            }
+        });
+
+        elements.form.addEventListener("submit", async event => {
+            event.preventDefault();
+            elements.tune.disabled = true;
+            setCommand("Tuning...");
+            const data = Object.fromEntries(new FormData(elements.form));
+            data.frequency_mhz = Number(data.frequency_mhz);
+            data.symbol_rate_ksps = Number(data.symbol_rate_ksps);
+            try {
+                await api("/tune", { method: "POST", body: JSON.stringify(data) });
+                setCommand("Tune command accepted", "ok");
+                setTimeout(refreshStatus, 350);
+            } catch (error) {
+                setCommand(`Tune failed: ${error.message}`, "error");
+            } finally {
+                elements.tune.disabled = false;
+            }
+        });
+
+        elements.refresh.addEventListener("click", refreshStatus);
+        elements.patDecoderOpen.addEventListener("click", openPatDecoder);
+        elements.patDecoderClose.addEventListener("click", closePatDecoder);
+        elements.patDecoderBackdrop.addEventListener("click", event => {
+            if (event.target === elements.patDecoderBackdrop) closePatDecoder();
+        });
+        document.addEventListener("keydown", event => {
+            if (event.key === "Escape" && document.body.classList.contains("decoder-open")) closePatDecoder();
+        });
+        loadChannels();
+        refreshStatus();
+        setInterval(() => {
+            if (!document.hidden) refreshStatus();
+        }, 500);
     </script>
 </body>
 </html>

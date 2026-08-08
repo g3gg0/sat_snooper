@@ -1,44 +1,86 @@
 [
   {
-    "displayName": "10847 V (DVB-S QPSK 5/6)",
+    "name": "10847 V (DVB-S QPSK 5/6)",
+    "frequency_mhz": 10847,
+    "symbol_rate_ksps": 22000,
     "polarization": "V",
-    "freqMHz": 10847,
-    "tuneParams": { "s": 22000, "inv": 0, "delsys": 5, "mod": 0, "pilot": 0, "fec": 5, "rolloff": 0 }
+    "delivery": "DVB-S",
+    "modulation": "QPSK",
+    "fec": "5/6",
+    "inversion": "OFF",
+    "pilot": "ON",
+    "rolloff": "0.35"
   },
   {
-    "displayName": "11671 H (DVB-S2 QPSK 2/3)",
+    "name": "11671 H (DVB-S2 QPSK 2/3)",
+    "frequency_mhz": 11671,
+    "symbol_rate_ksps": 22000,
     "polarization": "H",
-    "freqMHz": 11671,
-    "tuneParams": { "s": 22000, "inv": 0, "delsys": 6, "mod": 9, "pilot": 2, "fec": 2, "rolloff": 0 }
+    "delivery": "DVB-S2",
+    "modulation": "8PSK",
+    "fec": "2/3",
+    "inversion": "OFF",
+    "pilot": "AUTO",
+    "rolloff": "0.35"
   },
   {
-    "displayName": "10758 V (DVB-S2 8PSK 2/3)",
+    "name": "10758 V (DVB-S2 8PSK 2/3)",
+    "frequency_mhz": 10758,
+    "symbol_rate_ksps": 22000,
     "polarization": "V",
-    "freqMHz": 10758,
-    "tuneParams": { "s": 22000, "inv": 0, "delsys": 6, "mod": 9, "pilot": 2, "fec": 2, "rolloff": 0 }
+    "delivery": "DVB-S2",
+    "modulation": "8PSK",
+    "fec": "2/3",
+    "inversion": "OFF",
+    "pilot": "AUTO",
+    "rolloff": "0.35"
   },
   {
-    "displayName": "10995 H (DVB-S2 8PSK 5/6)",
+    "name": "10995 H (DVB-S2 8PSK 5/6)",
+    "frequency_mhz": 10995,
+    "symbol_rate_ksps": 22000,
     "polarization": "H",
-    "freqMHz": 10995,
-    "tuneParams": { "s": 22000, "inv": 0, "delsys": 6, "mod": 9, "pilot": 2, "fec": 5, "rolloff": 0 }
+    "delivery": "DVB-S2",
+    "modulation": "8PSK",
+    "fec": "5/6",
+    "inversion": "OFF",
+    "pilot": "AUTO",
+    "rolloff": "0.35"
   },
   {
-    "displayName": "12669 V (DVB-S2 8PSK 3/4 R0.25)",
+    "name": "12669 V (DVB-S2 8PSK 3/4 R0.25)",
+    "frequency_mhz": 12669,
+    "symbol_rate_ksps": 23500,
     "polarization": "V",
-    "freqMHz": 12669,
-    "tuneParams": { "s": 23500, "inv": 2, "delsys": 6, "mod": 9, "pilot": 2, "fec": 3, "rolloff": 2 }
+    "delivery": "DVB-S2",
+    "modulation": "8PSK",
+    "fec": "3/4",
+    "inversion": "AUTO",
+    "pilot": "AUTO",
+    "rolloff": "0.25"
   },
   {
-    "displayName": "11229 V (DVB-S2 8PSK 2/3 R0.20)",
+    "name": "11229 V (DVB-S2 8PSK 2/3 R0.20)",
+    "frequency_mhz": 11229,
+    "symbol_rate_ksps": 22000,
     "polarization": "V",
-    "freqMHz": 11229,
-    "tuneParams": { "s": 22000, "inv": 2, "delsys": 6, "mod": 9, "pilot": 2, "fec": 2, "rolloff": 1 }
+    "delivery": "DVB-S2",
+    "modulation": "8PSK",
+    "fec": "2/3",
+    "inversion": "AUTO",
+    "pilot": "AUTO",
+    "rolloff": "0.20"
   },
   {
-    "displayName": "11362 H (DVB-S2 8PSK 2/3)",
+    "name": "11362 H (DVB-S2 8PSK 2/3)",
+    "frequency_mhz": 11362,
+    "symbol_rate_ksps": 22000,
     "polarization": "H",
-    "freqMHz": 11362,
-    "tuneParams": { "s": 22000, "inv": 2, "delsys": 6, "mod": 9, "pilot": 2, "fec": 2, "rolloff": 0 }
+    "delivery": "DVB-S2",
+    "modulation": "8PSK",
+    "fec": "2/3",
+    "inversion": "AUTO",
+    "pilot": "AUTO",
+    "rolloff": "0.35"
   }
 ]

@@ -2,15 +2,9 @@
 <BaliProject version="3.2" title="sat_snooper" device="LCMXO2-1200HC-5SG32C" default_implementation="test_firmware">
     <Options/>
     <Implementation title="test_firmware" dir="test_firmware" description="test_firmware" synthesis="lse" default_strategy="Strategy1">
-        <Options def_top="i2c_gpio" top="top"/>
-        <Source name="LED.v" type="Verilog" type_short="Verilog">
-            <Options/>
-        </Source>
+        <Options def_top="top" top="top"/>
         <Source name="top.v" type="Verilog" type_short="Verilog">
             <Options top_module="top"/>
-        </Source>
-        <Source name="tuner.v" type="Verilog" type_short="Verilog">
-            <Options/>
         </Source>
         <Source name="I2S.v" type="Verilog" type_short="Verilog">
             <Options/>
@@ -18,10 +12,16 @@
         <Source name="mpeg_ts_sync_pid.v" type="Verilog" type_short="Verilog">
             <Options/>
         </Source>
+        <Source name="tuner.v" type="Verilog" type_short="Verilog">
+            <Options/>
+        </Source>
+        <Source name="telemetry.v" type="Verilog" type_short="Verilog">
+            <Options/>
+        </Source>
         <Source name="efb_define_def.v" type="Verilog" type_short="Verilog">
             <Options/>
         </Source>
-        <Source name="i2c_gpio.v" type="Verilog" type_short="Verilog">
+        <Source name="sim/tb_top_statistics.v" type="Verilog" type_short="Verilog" excluded="TRUE">
             <Options/>
         </Source>
         <Source name="efb.ipx" type="IPX_Module" type_short="IPX">

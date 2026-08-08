@@ -1,72 +1,122 @@
 /*
- * CX24116/CX24118 DVB-S/S2 Frontend Driver Interface
+ * DVB-S/S2 satellite tuner interface
  *
- * This file provides the public API for controlling the Conexant
- * CX24116/CX24118 demodulator.
+ * Hardware-specific frontend details are kept behind this API.
  */
 #pragma once
 
 #include "esp_err.h"
-#include "frontend.h"
 #include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
 
-/* Note: Include for DVB API enums like fe_status, fe_code_rate, etc.,
- * (e.g., linux_adapter.h) should be handled within tuner.c, 
- * not exposed in this public header if it causes include issues.
- * The integer types used in the structs below should be mapped to those
- * enums within tuner.c.
- */
+typedef enum {
+    TUNER_POLARIZATION_VERTICAL = 0,
+    TUNER_POLARIZATION_HORIZONTAL = 1,
+} tuner_polarization_t;
 
-/* Structure to hold all tuning parameters for web API */
+typedef enum {
+    TUNER_FEC_NONE = 0,
+    TUNER_FEC_1_2 = 1,
+    TUNER_FEC_2_3 = 2,
+    TUNER_FEC_3_4 = 3,
+    TUNER_FEC_4_5 = 4,
+    TUNER_FEC_5_6 = 5,
+    TUNER_FEC_6_7 = 6,
+    TUNER_FEC_7_8 = 7,
+    TUNER_FEC_8_9 = 8,
+    TUNER_FEC_AUTO = 9,
+    TUNER_FEC_3_5 = 10,
+    TUNER_FEC_9_10 = 11,
+    TUNER_FEC_2_5 = 12,
+} tuner_fec_t;
+
+typedef enum {
+    TUNER_INVERSION_OFF = 0,
+    TUNER_INVERSION_ON = 1,
+    TUNER_INVERSION_AUTO = 2,
+} tuner_inversion_t;
+
+typedef enum {
+    TUNER_DELIVERY_DVB_S = 5,
+    TUNER_DELIVERY_DVB_S2 = 6,
+} tuner_delivery_system_t;
+
+typedef enum {
+    TUNER_MODULATION_QPSK = 0,
+    TUNER_MODULATION_8PSK = 9,
+} tuner_modulation_t;
+
+typedef enum {
+    TUNER_PILOT_ON = 0,
+    TUNER_PILOT_OFF = 1,
+    TUNER_PILOT_AUTO = 2,
+} tuner_pilot_t;
+
+typedef enum {
+    TUNER_ROLLOFF_35 = 0,
+    TUNER_ROLLOFF_20 = 1,
+    TUNER_ROLLOFF_25 = 2,
+    TUNER_ROLLOFF_AUTO = 3,
+} tuner_rolloff_t;
+
 typedef struct {
-    uint32_t freq_mhz;          /* Tuner frequency in kHz */
-    uint32_t sr_ksps;           /* Symbol rate in kilo symbols per second */
-    int32_t  pol;               /* 0 = V, 1 = H */
-    int32_t  fec;               /* FEC (e.g., maps to enum fe_code_rate in tuner.c) */
-    int32_t  inv;               /* Inversion (e.g., maps to enum fe_spectral_inversion in tuner.c) */
-    int32_t  delsys;            /* Delivery system (e.g., maps to enum fe_delivery_system in tuner.c) */
-    int32_t  mod;               /* Modulation (e.g., maps to enum fe_modulation in tuner.c) */
-    int32_t  pilot;             /* Pilot (e.g., maps to enum fe_pilot in tuner.c) */
-    int32_t  rolloff;           /* Rolloff (e.g., maps to enum fe_rolloff in tuner.c) */
-} tuner_tune_params_t;
+    uint32_t frequency_mhz;
+    uint32_t symbol_rate_ksps;
+    tuner_polarization_t polarization;
+    tuner_fec_t fec;
+    tuner_inversion_t inversion;
+    tuner_delivery_system_t delivery_system;
+    tuner_modulation_t modulation;
+    tuner_pilot_t pilot;
+    tuner_rolloff_t rolloff;
+} tuner_tune_request_t;
 
-/* Structure to hold tuner status for web API */
+typedef enum {
+    TUNER_STATUS_SIGNAL = 0x01,
+    TUNER_STATUS_CARRIER = 0x02,
+    TUNER_STATUS_VITERBI = 0x04,
+    TUNER_STATUS_SYNC = 0x08,
+    TUNER_STATUS_LOCK = 0x10,
+    TUNER_STATUS_TIMEOUT = 0x20,
+    TUNER_STATUS_REINITIALIZED = 0x40,
+} tuner_status_flag_t;
+
 typedef struct {
     bool initialized;
-    uint32_t status_flags; /* Raw status flags (e.g., maps from enum fe_status in tuner.c) */
-    uint16_t snr;          /* Signal to Noise Ratio */
-    uint16_t strength;     /* Signal Strength */
-    uint32_t ber;          /* Bit Error Rate */
-    uint32_t uc_blocks;    /* Uncorrected Blocks */
+    uint32_t flags;
+    bool snr_available;
+    uint16_t snr;
+    bool strength_available;
+    uint16_t strength;
+    bool ber_available;
+    uint32_t ber;
+    bool uncorrected_blocks_available;
+    uint32_t uncorrected_blocks;
+    bool esno_available;
+    uint16_t esno_tenth_db;
+    bool acquired_mode_available;
+    tuner_delivery_system_t acquired_delivery_system;
+    tuner_modulation_t acquired_modulation;
+    tuner_fec_t acquired_fec;
+    bool acquired_pilot_on;
+    bool lnb_ready_available;
+    bool lnb_ready;
+    bool firmware_running_available;
+    bool firmware_running;
+    bool firmware_version_available;
+    uint8_t firmware_version[4];
+    bool chip_id_available;
+    uint16_t chip_id;
 } tuner_status_t;
 
-/**
- * @brief Register console commands for CX24116 control.
- */
-void tuner_init_base(void);
-
-int tuner_init();
-
-/**
- * @brief Get current tuner status for web API.
- *
- * @param status_data Pointer to a tuner_status_t struct to be filled.
- * @return ESP_OK on success, ESP_ERR_INVALID_STATE if tuner not initialized, or other error codes.
- */
-esp_err_t tuner_get_status_data(tuner_status_t *status_data);
-
-/**
- * @brief Perform tuning based on parameters from web API.
- *
- * @param params Pointer to a tuner_tune_params_t struct with tuning parameters.
- * @return ESP_OK on success, ESP_ERR_INVALID_STATE if tuner not initialized, or other error codes from tune operation.
- */
-esp_err_t tuner_web_tune(const tuner_tune_params_t *params);
-
-void tuner_reset_set(bool state);
-bool tuner_reset_get();
+/* Console registration is separate from hardware initialization. */
+void tuner_register_console(void);
+esp_err_t tuner_initialize(void);
+bool tuner_is_initialized(void);
+esp_err_t tuner_tune(const tuner_tune_request_t *request);
+esp_err_t tuner_get_status(tuner_status_t *status);
+void tuner_set_reset(bool active);
+bool tuner_get_reset(void);
 
 
 

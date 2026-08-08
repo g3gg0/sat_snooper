@@ -82,7 +82,9 @@ struct kref
 
 //#define __func__ ""
 
-#define EREMOTEIO -1
+#ifndef EREMOTEIO
+#define EREMOTEIO 121
+#endif
 #define GFP_KERNEL -1
 #define KERN_ERR "E"
 

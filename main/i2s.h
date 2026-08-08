@@ -4,6 +4,8 @@
 #ifndef I2S_SLAVE_H
 #define I2S_SLAVE_H
 
+#include <stdbool.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -12,6 +14,27 @@ extern "C" {
 
 #define I2S_TASK_STACK_SIZE 6188
 #define I2S_TASK_PRIORITY 5
+#define I2S_FPGA_MAX_PIDS 32
+#define I2S_FPGA_PAT_SIZE 188
+
+typedef struct {
+	bool available;
+	uint32_t sync_count;
+	uint32_t data_bytes_received;
+	uint32_t sync_byte_errors;
+} i2s_fpga_statistics_t;
+
+typedef struct {
+	bool available;
+	bool overflow;
+	uint8_t count;
+	uint16_t pids[I2S_FPGA_MAX_PIDS];
+} i2s_fpga_pid_report_t;
+
+typedef struct {
+	bool available;
+	uint8_t data[I2S_FPGA_PAT_SIZE];
+} i2s_fpga_pat_t;
 
 /**
  * @brief Initializes the I2S peripheral in slave RX mode.
@@ -24,6 +47,9 @@ extern "C" {
  */
 esp_err_t i2s_init(void);
 void i2s_read_task(void *arg);
+void i2s_get_fpga_statistics(i2s_fpga_statistics_t *statistics);
+void i2s_get_fpga_pid_report(i2s_fpga_pid_report_t *report);
+void i2s_get_fpga_pat(i2s_fpga_pat_t *pat);
 
 #ifdef __cplusplus
 }

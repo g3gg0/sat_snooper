@@ -169,6 +169,9 @@ struct cx24116_cmd {
 struct cx24116_state {
 	struct i2c_adapter *i2c;
 	const struct cx24116_config *config;
+	u16 chip_id;
+	bool firmware_version_valid;
+	u8 firmware_version[4];
 
 	struct dvb_frontend frontend;
 
@@ -507,19 +510,27 @@ static int cx24116_firmware_ondemand(struct dvb_frontend *fe)
 /* Take a basic firmware command structure, format it
  * and forward it for processing
  */
-static int cx24116_cmd_execute(struct dvb_frontend *fe, struct cx24116_cmd *cmd)
+static int cx24116_cmd_execute_internal(struct dvb_frontend *fe,
+	struct cx24116_cmd *cmd, bool allow_firmware_load)
 {
 	struct cx24116_state *state = fe->demodulator_priv;
 	int i, ret;
 
 	dprintk("%s()\n", __func__);
 
-	/* Load the firmware if required */
-	ret = cx24116_firmware_ondemand(fe);
-	if (ret != 0) {
-		printk(KERN_ERR "%s(): Unable initialise the firmware\n",
-			__func__);
-		return ret;
+	if (allow_firmware_load) {
+		ret = cx24116_firmware_ondemand(fe);
+		if (ret != 0) {
+			printk(KERN_ERR "%s(): Unable initialise the firmware\n",
+				__func__);
+			return ret;
+		}
+	} else {
+		ret = cx24116_readreg(state, CX24116_REG_RESET);
+		if (ret < 0)
+			return ret;
+		if (ret > 0)
+			return -EREMOTEIO;
 	}
 
 	/* Write the command */
@@ -541,6 +552,17 @@ static int cx24116_cmd_execute(struct dvb_frontend *fe, struct cx24116_cmd *cmd)
 		}
 	}
 	return 0;
+}
+
+static int cx24116_cmd_execute(struct dvb_frontend *fe, struct cx24116_cmd *cmd)
+{
+	return cx24116_cmd_execute_internal(fe, cmd, true);
+}
+
+static int cx24116_cmd_execute_no_autoload(struct dvb_frontend *fe,
+	struct cx24116_cmd *cmd)
+{
+	return cx24116_cmd_execute_internal(fe, cmd, false);
 }
 
 static int cx24116_load_firmware(struct dvb_frontend *fe,
@@ -658,7 +680,9 @@ static int cx24116_load_firmware(struct dvb_frontend *fe,
 		if (ret != 0)
 			return ret;
 		vers[i] = cx24116_readreg(state, CX24116_REG_MAILBOX);
+		state->firmware_version[i] = vers[i];
 	}
+	state->firmware_version_valid = true;
 	printk(KERN_INFO "%s: FW version %i.%i.%i.%i\n", __func__,
 		vers[0], vers[1], vers[2], vers[3]);
 
@@ -668,9 +692,12 @@ static int cx24116_load_firmware(struct dvb_frontend *fe,
 static int cx24116_read_status(struct dvb_frontend *fe, enum fe_status *status)
 {
 	struct cx24116_state *state = fe->demodulator_priv;
+	int lock;
 
-	int lock = cx24116_readreg(state, CX24116_REG_SSTATUS) &
-		CX24116_STATUS_MASK;
+	lock = cx24116_readreg(state, CX24116_REG_SSTATUS);
+	if (lock < 0)
+		return lock;
+	lock &= CX24116_STATUS_MASK;
 
 	dprintk("%s: status = 0x%02x\n", __func__, lock);
 
@@ -691,13 +718,22 @@ static int cx24116_read_status(struct dvb_frontend *fe, enum fe_status *status)
 static int cx24116_read_ber(struct dvb_frontend *fe, u32 *ber)
 {
 	struct cx24116_state *state = fe->demodulator_priv;
+	int ber24;
+	int ber16;
+	int ber8;
+	int ber0;
 
 	dprintk("%s()\n", __func__);
 
-	*ber =  (cx24116_readreg(state, CX24116_REG_BER24) << 24) |
-		(cx24116_readreg(state, CX24116_REG_BER16) << 16) |
-		(cx24116_readreg(state, CX24116_REG_BER8)  << 8)  |
-		 cx24116_readreg(state, CX24116_REG_BER0);
+	ber24 = cx24116_readreg(state, CX24116_REG_BER24);
+	ber16 = cx24116_readreg(state, CX24116_REG_BER16);
+	ber8 = cx24116_readreg(state, CX24116_REG_BER8);
+	ber0 = cx24116_readreg(state, CX24116_REG_BER0);
+	if (ber24 < 0 || ber16 < 0 || ber8 < 0 || ber0 < 0)
+		return -EREMOTEIO;
+
+	*ber = ((u32)ber24 << 24) | ((u32)ber16 << 16) |
+		((u32)ber8 << 8) | (u32)ber0;
 
 	return 0;
 }
@@ -709,21 +745,24 @@ static int cx24116_read_signal_strength(struct dvb_frontend *fe,
 	struct cx24116_state *state = fe->demodulator_priv;
 	struct cx24116_cmd cmd;
 	int ret;
+	int signal_status;
+	int signal;
 	u16 sig_reading;
 
 	dprintk("%s()\n", __func__);
 
-	/* Firmware CMD 19: Get AGC */
 	cmd.args[0x00] = CMD_GETAGC;
 	cmd.len = 0x01;
-	ret = cx24116_cmd_execute(fe, &cmd);
+	ret = cx24116_cmd_execute_no_autoload(fe, &cmd);
 	if (ret != 0)
 		return ret;
 
-	sig_reading =
-		(cx24116_readreg(state,
-			CX24116_REG_SSTATUS) & CX24116_SIGNAL_MASK) |
-		(cx24116_readreg(state, CX24116_REG_SIGNAL) << 6);
+	signal_status = cx24116_readreg(state, CX24116_REG_SSTATUS);
+	signal = cx24116_readreg(state, CX24116_REG_SIGNAL);
+	if (signal_status < 0 || signal < 0)
+		return -EREMOTEIO;
+
+	sig_reading = (signal_status & CX24116_SIGNAL_MASK) | (signal << 6);
 	*signal_strength = 0 - sig_reading;
 
 	dprintk("%s: raw / cooked = 0x%04x / 0x%04x\n",
@@ -793,11 +832,39 @@ static int cx24116_read_snr(struct dvb_frontend *fe, u16 *snr)
 static int cx24116_read_ucblocks(struct dvb_frontend *fe, u32 *ucblocks)
 {
 	struct cx24116_state *state = fe->demodulator_priv;
+	int ucb8;
+	int ucb0;
 
 	dprintk("%s()\n", __func__);
 
-	*ucblocks = (cx24116_readreg(state, CX24116_REG_UCB8) << 8) |
-		cx24116_readreg(state, CX24116_REG_UCB0);
+	ucb8 = cx24116_readreg(state, CX24116_REG_UCB8);
+	ucb0 = cx24116_readreg(state, CX24116_REG_UCB0);
+	if (ucb8 < 0 || ucb0 < 0)
+		return -EREMOTEIO;
+
+	*ucblocks = ((u32)ucb8 << 8) | (u32)ucb0;
+
+	return 0;
+}
+
+int cx24116_get_diagnostics(struct dvb_frontend *fe,
+	struct cx24116_diagnostics *diagnostics)
+{
+	struct cx24116_state *state;
+
+	if (!fe || !diagnostics)
+		return -EINVAL;
+
+	state = fe->demodulator_priv;
+	diagnostics->chip_id = state->chip_id;
+	diagnostics->firmware_version_valid = state->firmware_version_valid;
+	memcpy(diagnostics->firmware_version, state->firmware_version,
+		sizeof(diagnostics->firmware_version));
+	diagnostics->firmware_status = cx24116_readreg(state, CX24116_REG_RESET);
+	diagnostics->qstatus = cx24116_readreg(state, CX24116_REG_QSTATUS);
+	diagnostics->fec_status = cx24116_readreg(state, CX24116_REG_FECSTATUS);
+	diagnostics->quality8 = cx24116_readreg(state, CX24116_REG_QUALITY8);
+	diagnostics->quality0 = cx24116_readreg(state, CX24116_REG_QUALITY0);
 
 	return 0;
 }
@@ -1122,6 +1189,7 @@ struct dvb_frontend *cx24116_attach(const struct cx24116_config *config,
 	/* check if the demod is present */
 	ret = (cx24116_readreg(state, 0xFF) << 8) |
 		cx24116_readreg(state, 0xFE);
+	state->chip_id = ret;
 	if (ret != 0x0501) {
 		kfree(state);
 		printk(KERN_INFO "Invalid probe, probably not a CX24116 device\n");

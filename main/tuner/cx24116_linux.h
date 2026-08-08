@@ -35,6 +35,20 @@ struct cx24116_config {
 	void (*set_lock_led)(struct dvb_frontend *fe, int offon);
 };
 
+struct cx24116_diagnostics {
+	u16 chip_id;
+	bool firmware_version_valid;
+	u8 firmware_version[4];
+	int firmware_status;
+	int qstatus;
+	int fec_status;
+	int quality8;
+	int quality0;
+};
+
+int cx24116_get_diagnostics(struct dvb_frontend *fe,
+	struct cx24116_diagnostics *diagnostics);
+
 #if IS_REACHABLE(CONFIG_DVB_CX24116)
 extern struct dvb_frontend *cx24116_attach(
 	const struct cx24116_config *config,

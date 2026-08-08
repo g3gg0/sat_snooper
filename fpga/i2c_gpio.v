@@ -57,7 +57,7 @@ module i2c_gpio
 					   (       
 					    inout        SCL,
 						inout        SDA,
-						output       Enable,
+            output reg   Enable,
 						input[7:0]  Status,
 						input        RST_N,
 						input        CLK,
@@ -95,8 +95,6 @@ reg [7:0] data2;
 reg [7:0] data3;
 reg [7:0] temp0,temp1,temp2,temp3;
 reg [7:0] n_temp0,n_temp1,n_temp2,n_temp3;
-reg       Enable   ;
-
 integer j;
 
  
