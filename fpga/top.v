@@ -17,9 +17,7 @@ module top
     input D4,
     input D5,
     input D6,
-    input D7,
-    input DATA_VALID,
-    input SYNC
+    input D7
 );
     wire osc;
     reg [7:0] rst_ctr = 8'd0;
@@ -35,6 +33,16 @@ module top
     wire [7:0] frame_data;
     wire frame_data_valid;
     wire frame_data_ready;
+    wire [3:0] filter_enable;
+    wire [12:0] filter_pid_0;
+    wire [12:0] filter_mask_0;
+    wire [12:0] filter_pid_1;
+    wire [12:0] filter_mask_1;
+    wire [12:0] filter_pid_2;
+    wire [12:0] filter_mask_2;
+    wire [12:0] filter_pid_3;
+    wire [12:0] filter_mask_3;
+    wire filter_config_toggle;
 
     defparam i_osc.NOM_FREQ = "8.31";
     OSCH i_osc (
@@ -55,8 +63,6 @@ module top
     tuner u_tuner (
         .clk(TUNER_CLK),
         .rst_n(rst_n),
-        .valid(DATA_VALID),
-        .sync(SYNC),
         .d0(D0),
         .d1(D1),
         .d2(D2),
@@ -86,21 +92,36 @@ module top
         .ts_byte_index(tuner_stream_byte_index),
         .ts_pid_valid(tuner_stream_pid_valid),
         .ts_pid(tuner_stream_pid),
+        .filter_enable(filter_enable),
+        .filter_pid_0(filter_pid_0),
+        .filter_mask_0(filter_mask_0),
+        .filter_pid_1(filter_pid_1),
+        .filter_mask_1(filter_mask_1),
+        .filter_pid_2(filter_pid_2),
+        .filter_mask_2(filter_mask_2),
+        .filter_pid_3(filter_pid_3),
+        .filter_mask_3(filter_mask_3),
+        .filter_config_toggle(filter_config_toggle),
         .frame_data(frame_data),
         .frame_data_valid(frame_data_valid),
         .frame_data_ready(frame_data_ready)
     );
 
-    efb UUT (
-        .wb_clk_i(osc),
-        .wb_rst_i(~rst_n),
-        .wb_cyc_i(1'b0),
-        .wb_stb_i(1'b0),
-        .wb_we_i(1'b0),
-        .wb_adr_i(8'd0),
-        .wb_dat_i(8'd0),
-        .i2c1_scl(SCL),
-        .i2c1_sda(SDA)
+    i2c_pid_filter u_i2c_pid_filter (
+        .clk(osc),
+        .rst_n(rst_n),
+        .scl(SCL),
+        .sda(SDA),
+        .filter_enable(filter_enable),
+        .filter_pid_0(filter_pid_0),
+        .filter_mask_0(filter_mask_0),
+        .filter_pid_1(filter_pid_1),
+        .filter_mask_1(filter_mask_1),
+        .filter_pid_2(filter_pid_2),
+        .filter_mask_2(filter_mask_2),
+        .filter_pid_3(filter_pid_3),
+        .filter_mask_3(filter_mask_3),
+        .config_toggle(filter_config_toggle)
     );
 
     i2s_tx u_i2s (

@@ -1,7 +1,7 @@
 /*  MPEG-TS tuner
     ----------------------------------------------------------------
     � Samples an 8-bit parallel stream into eight 188-byte buffers.
-    � Buffer is switched on SYNC; write occurs when VALID is high.
+    � Packet synchronization is acquired from 0x47 bytes while VALID is high.
     � Implements true dual-port block RAM (write-port A, read-port B).
 */
 
@@ -9,8 +9,6 @@ module tuner
 (
     input        clk,           /* write clock                             */
     input        rst_n,         /* active-low reset                        */
-    input        valid,         /* data valid                              */
-    input        sync,          /* start-of-packet                         */
     input        d0,
     input        d1,
     input        d2,
@@ -46,8 +44,6 @@ module tuner
     mpeg_ts_sync_pid u_mpeg_ts_sync (
         .clk                (clk),
         .rst_n              (rst_n),
-        .data_valid         (valid),
-        .packet_sync        (sync),
         .data_byte_in       (data_byte_in),
         .sync_pulse         (sync_module_sync_pulse),
         .byte_enable_out    (sync_module_byte_enable),
@@ -63,7 +59,7 @@ module tuner
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n)
             stream_data_reg <= 8'd0;
-        else if (valid)
+        else
             stream_data_reg <= data_byte_in;
     end
 

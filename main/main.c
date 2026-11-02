@@ -27,6 +27,9 @@
 #include "web.h"
 #include "cmd.h"
 #include "led.h"
+#include "ts_stream.h"
+#include "boot_button.h"
+#include "serial_protocol.h"
 
 
 static const char *TAG = "satsnooper";
@@ -62,12 +65,14 @@ void app_main(void)
     voltage_init();
     i2c_init();
     fpga_init();
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ts_stream_init());
     i2s_init();
     tuner_register_console();
+    ESP_ERROR_CHECK_WITHOUT_ABORT(serial_protocol_start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(boot_button_init());
 
     wifi_start();
     telnet_start();
     web_start();
-    cmd_start();
 
 }

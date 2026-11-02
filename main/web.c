@@ -2,14 +2,22 @@
 
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "cJSON.h"
+#include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "mbedtls/base64.h"
 #include "i2s.h"
+#include "channel_config.h"
 #include "tuner/tuner.h"
+#include "ts_stream.h"
 #include "voltage.h"
 
 #define INDEX_HTML_PATH "/storage/www/index.htm"
@@ -18,6 +26,31 @@
 
 static const char *TAG = "web";
 static httpd_handle_t server;
+
+static void packet_to_hex(const uint8_t *packet, char *output);
+static bool packet_to_base64(const uint8_t *packet, char *output, size_t output_size);
+
+/* The UI may be opened from a local file, which sends Origin: null */
+static void set_cors_headers(httpd_req_t *req)
+{
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+    httpd_resp_set_hdr(req, "Access-Control-Max-Age", "600");
+}
+
+static esp_err_t options_handler(httpd_req_t *req)
+{
+    set_cors_headers(req);
+    httpd_resp_set_status(req, "204 No Content");
+    return httpd_resp_send(req, NULL, 0);
+}
+
+/* Shadow the IDF inline helpers so error replies carry the CORS headers too */
+#define httpd_resp_send_404(req) \
+    (set_cors_headers(req), httpd_resp_send_err((req), HTTPD_404_NOT_FOUND, NULL))
+#define httpd_resp_send_500(req) \
+    (set_cors_headers(req), httpd_resp_send_err((req), HTTPD_500_INTERNAL_SERVER_ERROR, NULL))
 
 static esp_err_t send_json(httpd_req_t *req, cJSON *body, const char *status)
 {
@@ -31,6 +64,7 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *body, const char *status)
 
     httpd_resp_set_status(req, status);
     httpd_resp_set_type(req, "application/json");
+    set_cors_headers(req);
     esp_err_t result = httpd_resp_sendstr(req, json);
     cJSON_free(json);
     cJSON_Delete(body);
@@ -88,6 +122,7 @@ static esp_err_t send_file(httpd_req_t *req, const char *path, const char *conte
 
     httpd_resp_set_type(req, content_type);
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    set_cors_headers(req);
 
     char buffer[512];
     ssize_t length;
@@ -120,6 +155,7 @@ static esp_err_t favicon_get_handler(httpd_req_t *req)
     extern const unsigned char favicon_ico_start[] asm("_binary_favicon_ico_start");
     extern const unsigned char favicon_ico_end[] asm("_binary_favicon_ico_end");
     httpd_resp_set_type(req, "image/x-icon");
+    set_cors_headers(req);
     return httpd_resp_send(req, (const char *)favicon_ico_start,
                            favicon_ico_end - favicon_ico_start);
 }
@@ -197,6 +233,7 @@ static esp_err_t tuner_get_handler(httpd_req_t *req)
     i2s_fpga_statistics_t fpga_statistics = {0};
     i2s_fpga_pid_report_t fpga_pid_report = {0};
     i2s_fpga_pat_t fpga_pat = {0};
+    i2s_retained_pid_buffer_t retained_pid_buffers[I2S_RETAINED_PID_SLOT_COUNT] = {0};
     char pat_hex[I2S_FPGA_PAT_SIZE * 2 + 1];
     char firmware_version[16] = {0};
     char chip_id[8] = {0};
@@ -270,6 +307,8 @@ static esp_err_t tuner_get_handler(httpd_req_t *req)
                         fpga_statistics.data_bytes_received);
     add_optional_number(fpga_body, "sync_byte_errors", fpga_statistics.available,
                         fpga_statistics.sync_byte_errors);
+    add_optional_number(fpga_body, "filtered_drops", fpga_statistics.available,
+                        fpga_statistics.filtered_drops);
 
     i2s_get_fpga_pid_report(&fpga_pid_report);
     cJSON *pid_body = cJSON_AddObjectToObject(body, "fpga_pid_report");
@@ -300,6 +339,37 @@ static esp_err_t tuner_get_handler(httpd_req_t *req)
         cJSON_AddNullToObject(pid_body, "pids");
     }
 
+    i2s_get_retained_pid_buffers(retained_pid_buffers);
+    cJSON *control_buffers_body = cJSON_AddArrayToObject(body, "retained_pid_buffers");
+    if (!control_buffers_body)
+    {
+        cJSON_Delete(body);
+        httpd_resp_send_500(req);
+        return ESP_ERR_NO_MEM;
+    }
+    for (size_t index = 0; index < I2S_RETAINED_PID_SLOT_COUNT; index++)
+    {
+        if (!retained_pid_buffers[index].available)
+        {
+            continue;
+        }
+        cJSON *buffer_body = cJSON_CreateObject();
+        if (!buffer_body)
+        {
+            cJSON_Delete(body);
+            httpd_resp_send_500(req);
+            return ESP_ERR_NO_MEM;
+        }
+        cJSON_AddNumberToObject(buffer_body, "pid", retained_pid_buffers[index].pid);
+        cJSON_AddNumberToObject(buffer_body, "retained_packets",
+                    retained_pid_buffers[index].packet_count);
+        cJSON_AddNumberToObject(buffer_body, "packets_received",
+                    retained_pid_buffers[index].packets_received);
+        cJSON_AddNumberToObject(buffer_body, "continuity_errors",
+                    retained_pid_buffers[index].continuity_errors);
+        cJSON_AddItemToArray(control_buffers_body, buffer_body);
+    }
+
     i2s_get_fpga_pat(&fpga_pat);
     cJSON *pat_body = cJSON_AddObjectToObject(body, "fpga_pat");
     if (!pat_body)
@@ -325,6 +395,30 @@ static esp_err_t tuner_get_handler(httpd_req_t *req)
         cJSON_AddNullToObject(pat_body, "length");
         cJSON_AddNullToObject(pat_body, "hex");
     }
+
+    cJSON *heap_body = cJSON_AddObjectToObject(body, "heap");
+    if (!heap_body)
+    {
+        cJSON_Delete(body);
+        httpd_resp_send_500(req);
+        return ESP_ERR_NO_MEM;
+    }
+    cJSON_AddNumberToObject(heap_body, "free_internal",
+                            heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    cJSON_AddNumberToObject(heap_body, "min_free_internal",
+                            heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    cJSON_AddNumberToObject(heap_body, "largest_block_internal",
+                            heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    cJSON_AddNumberToObject(heap_body, "free_spiram",
+                            heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    cJSON_AddNumberToObject(heap_body, "min_free_spiram",
+                            heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
+    cJSON_AddNumberToObject(heap_body, "largest_block_spiram",
+                            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+    cJSON_AddNumberToObject(heap_body, "uptime_s", esp_timer_get_time() / 1000000);
+    cJSON_AddNumberToObject(heap_body, "min_task_stack",
+                            uxTaskGetStackHighWaterMark(NULL));
+
     return send_json(req, body, "200 OK");
 }
 
@@ -338,105 +432,6 @@ static esp_err_t tuner_init_handler(httpd_req_t *req)
     return send_result(req, "200 OK", true, NULL);
 }
 
-static bool json_string_equals(const cJSON *root, const char *name, const char *value)
-{
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, name);
-    return cJSON_IsString(item) && strcmp(item->valuestring, value) == 0;
-}
-
-static bool parse_fec(const cJSON *root, tuner_fec_t *fec)
-{
-    static const struct {
-        const char *name;
-        tuner_fec_t value;
-    } values[] = {
-        {"NONE", TUNER_FEC_NONE}, {"1/2", TUNER_FEC_1_2}, {"2/3", TUNER_FEC_2_3},
-        {"3/4", TUNER_FEC_3_4}, {"4/5", TUNER_FEC_4_5}, {"5/6", TUNER_FEC_5_6},
-        {"6/7", TUNER_FEC_6_7}, {"7/8", TUNER_FEC_7_8}, {"8/9", TUNER_FEC_8_9},
-        {"AUTO", TUNER_FEC_AUTO}, {"3/5", TUNER_FEC_3_5}, {"9/10", TUNER_FEC_9_10},
-        {"2/5", TUNER_FEC_2_5},
-    };
-
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "fec");
-    if (!cJSON_IsString(item))
-    {
-        return false;
-    }
-    for (size_t index = 0; index < sizeof(values) / sizeof(values[0]); ++index)
-    {
-        if (strcmp(item->valuestring, values[index].name) == 0)
-        {
-            *fec = values[index].value;
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool parse_tune_request(const cJSON *root, tuner_tune_request_t *request)
-{
-    const cJSON *frequency = cJSON_GetObjectItemCaseSensitive(root, "frequency_mhz");
-    const cJSON *symbol_rate = cJSON_GetObjectItemCaseSensitive(root, "symbol_rate_ksps");
-    if (!cJSON_IsNumber(frequency) || !cJSON_IsNumber(symbol_rate) ||
-        !parse_fec(root, &request->fec))
-    {
-        return false;
-    }
-
-    request->frequency_mhz = frequency->valueint;
-    request->symbol_rate_ksps = symbol_rate->valueint;
-
-    if (json_string_equals(root, "polarization", "V"))
-        request->polarization = TUNER_POLARIZATION_VERTICAL;
-    else if (json_string_equals(root, "polarization", "H"))
-        request->polarization = TUNER_POLARIZATION_HORIZONTAL;
-    else
-        return false;
-
-    if (json_string_equals(root, "delivery", "DVB-S"))
-        request->delivery_system = TUNER_DELIVERY_DVB_S;
-    else if (json_string_equals(root, "delivery", "DVB-S2"))
-        request->delivery_system = TUNER_DELIVERY_DVB_S2;
-    else
-        return false;
-
-    if (json_string_equals(root, "modulation", "QPSK"))
-        request->modulation = TUNER_MODULATION_QPSK;
-    else if (json_string_equals(root, "modulation", "8PSK"))
-        request->modulation = TUNER_MODULATION_8PSK;
-    else
-        return false;
-
-    if (json_string_equals(root, "inversion", "OFF"))
-        request->inversion = TUNER_INVERSION_OFF;
-    else if (json_string_equals(root, "inversion", "ON"))
-        request->inversion = TUNER_INVERSION_ON;
-    else if (json_string_equals(root, "inversion", "AUTO"))
-        request->inversion = TUNER_INVERSION_AUTO;
-    else
-        return false;
-
-    if (json_string_equals(root, "pilot", "ON"))
-        request->pilot = TUNER_PILOT_ON;
-    else if (json_string_equals(root, "pilot", "OFF"))
-        request->pilot = TUNER_PILOT_OFF;
-    else if (json_string_equals(root, "pilot", "AUTO"))
-        request->pilot = TUNER_PILOT_AUTO;
-    else
-        return false;
-
-    if (json_string_equals(root, "rolloff", "0.35"))
-        request->rolloff = TUNER_ROLLOFF_35;
-    else if (json_string_equals(root, "rolloff", "0.20"))
-        request->rolloff = TUNER_ROLLOFF_20;
-    else if (json_string_equals(root, "rolloff", "0.25"))
-        request->rolloff = TUNER_ROLLOFF_25;
-    else
-        return false;
-
-    return true;
-}
-
 static esp_err_t tuner_tune_handler(httpd_req_t *req)
 {
     if (!tuner_is_initialized())
@@ -446,7 +441,7 @@ static esp_err_t tuner_tune_handler(httpd_req_t *req)
 
     cJSON *body = receive_json(req);
     tuner_tune_request_t request;
-    if (!body || !parse_tune_request(body, &request))
+    if (!body || !channel_config_parse_tune_request(body, &request))
     {
         cJSON_Delete(body);
         return send_result(req, "400 Bad Request", false, "invalid_tune_request");
@@ -465,6 +460,83 @@ static esp_err_t tuner_tune_handler(httpd_req_t *req)
     return send_result(req, "200 OK", true, NULL);
 }
 
+static esp_err_t retained_pid_get_handler(httpd_req_t *req)
+{
+    char query[16];
+    char pid_value[6];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "pid", pid_value, sizeof(pid_value)) != ESP_OK)
+    {
+        return send_result(req, "400 Bad Request", false, "missing_pid");
+    }
+
+    char *end = NULL;
+    unsigned long parsed_pid = strtoul(pid_value, &end, 0);
+    if (!end || *end != '\0' || parsed_pid > 0x1fff)
+    {
+        return send_result(req, "400 Bad Request", false, "invalid_pid");
+    }
+
+    uint8_t *packets = heap_caps_malloc(I2S_RETAINED_PID_PACKET_CAPACITY * TS_PACKET_SIZE,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!packets)
+    {
+        httpd_resp_send_500(req);
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t packet_count = i2s_copy_retained_pid_packets(parsed_pid, packets,
+                                                         I2S_RETAINED_PID_PACKET_CAPACITY);
+    char header[80];
+    int header_length = snprintf(header, sizeof(header),
+                                 "{\"pid\":%lu,\"retained_packets\":%u,\"packets\":[",
+                                 parsed_pid, (unsigned int)packet_count);
+    if (header_length < 0 || header_length >= sizeof(header))
+    {
+        free(packets);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_status(req, "200 OK");
+    httpd_resp_set_type(req, "application/json");
+    set_cors_headers(req);
+    if (httpd_resp_send_chunk(req, header, header_length) != ESP_OK)
+    {
+        free(packets);
+        httpd_resp_send_chunk(req, NULL, 0);
+        return ESP_FAIL;
+    }
+
+    for (size_t index = 0; index < packet_count; index++)
+    {
+        char packet_base64[4 * ((TS_PACKET_SIZE + 2) / 3) + 1];
+        const char *prefix = index == 0 ? "\"" : ",\"";
+        if (!packet_to_base64(packets + index * TS_PACKET_SIZE, packet_base64,
+                              sizeof(packet_base64)))
+        {
+            free(packets);
+            httpd_resp_send_chunk(req, NULL, 0);
+            return ESP_FAIL;
+        }
+        if (httpd_resp_send_chunk(req, prefix, strlen(prefix)) != ESP_OK ||
+            httpd_resp_send_chunk(req, packet_base64, strlen(packet_base64)) != ESP_OK ||
+            httpd_resp_send_chunk(req, "\"", 1) != ESP_OK)
+        {
+            free(packets);
+            httpd_resp_send_chunk(req, NULL, 0);
+            return ESP_FAIL;
+        }
+    }
+    free(packets);
+    if (httpd_resp_send_chunk(req, "]}", 2) != ESP_OK)
+    {
+        httpd_resp_send_chunk(req, NULL, 0);
+        return ESP_FAIL;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
 static esp_err_t tuner_reset_handler(httpd_req_t *req)
 {
     cJSON *body = receive_json(req);
@@ -481,14 +553,170 @@ static esp_err_t tuner_reset_handler(httpd_req_t *req)
     return send_result(req, "200 OK", true, NULL);
 }
 
+static void packet_to_hex(const uint8_t *packet, char *output)
+{
+    static const char hex[] = "0123456789abcdef";
+    for (size_t index = 0; index < TS_PACKET_SIZE; index++)
+    {
+        output[index * 2] = hex[packet[index] >> 4];
+        output[index * 2 + 1] = hex[packet[index] & 0x0f];
+    }
+    output[TS_PACKET_SIZE * 2] = '\0';
+}
+
+static bool packet_to_base64(const uint8_t *packet, char *output, size_t output_size)
+{
+    size_t output_length = 0;
+    /* mbedtls needs room for its own terminator, so pass the full buffer size */
+    if (mbedtls_base64_encode((unsigned char *)output, output_size, &output_length,
+                              packet, TS_PACKET_SIZE) != 0)
+    {
+        return false;
+    }
+    output[output_length] = '\0';
+    return true;
+}
+
+static esp_err_t filters_get_handler(httpd_req_t *req)
+{
+    ts_stream_status_t status = {0};
+    ts_stream_get_status(&status);
+    cJSON *body = cJSON_CreateObject();
+    cJSON *filters = body ? cJSON_AddArrayToObject(body, "filters") : NULL;
+    if (!body || !filters)
+    {
+        cJSON_Delete(body);
+        httpd_resp_send_500(req);
+        return ESP_ERR_NO_MEM;
+    }
+
+    cJSON_AddNumberToObject(body, "udp_port", TS_UDP_PORT);
+    cJSON_AddBoolToObject(body, "udp_enabled", status.udp_enabled);
+    cJSON_AddNumberToObject(body, "udp_max_rate_kib_s", status.udp_max_rate_kib_s);
+    cJSON_AddNumberToObject(body, "udp_datagrams", status.udp_datagram_count);
+    cJSON_AddNumberToObject(body, "udp_packets", status.udp_packet_count);
+    cJSON_AddNumberToObject(body, "udp_send_errors", status.udp_send_error_count);
+    cJSON_AddNumberToObject(body, "udp_throttle_drops", status.udp_throttle_drop_count);
+    cJSON_AddNumberToObject(body, "queue_drops", status.queue_drop_count);
+
+    for (size_t index = 0; index < FPGA_PID_FILTER_COUNT; index++)
+    {
+        const ts_filter_status_t *filter_status = &status.filters[index];
+        cJSON *filter = cJSON_CreateObject();
+        if (!filter)
+        {
+            cJSON_Delete(body);
+            httpd_resp_send_500(req);
+            return ESP_ERR_NO_MEM;
+        }
+        cJSON_AddItemToArray(filters, filter);
+        cJSON_AddBoolToObject(filter, "enabled", filter_status->config.enabled);
+        cJSON_AddNumberToObject(filter, "pid", filter_status->config.pid);
+        cJSON_AddNumberToObject(filter, "mask", filter_status->config.mask);
+        cJSON_AddNumberToObject(filter, "packet_count", filter_status->packet_count);
+        cJSON_AddNumberToObject(filter, "byte_count", filter_status->byte_count);
+        cJSON_AddNumberToObject(filter, "packets_per_second", filter_status->packets_per_second);
+        cJSON_AddNumberToObject(filter, "bytes_per_second", filter_status->bytes_per_second);
+        if (filter_status->latest_available)
+        {
+            char packet_hex[TS_PACKET_SIZE * 2 + 1];
+            packet_to_hex(filter_status->latest_packet, packet_hex);
+            cJSON_AddStringToObject(filter, "latest_packet", packet_hex);
+        }
+        else
+        {
+            cJSON_AddNullToObject(filter, "latest_packet");
+        }
+    }
+    return send_json(req, body, "200 OK");
+}
+
+static bool parse_filter_request(const cJSON *root,
+                                 fpga_pid_filter_t filters[FPGA_PID_FILTER_COUNT])
+{
+    const cJSON *items = cJSON_GetObjectItemCaseSensitive(root, "filters");
+    if (!cJSON_IsArray(items) || cJSON_GetArraySize(items) > FPGA_PID_FILTER_COUNT)
+    {
+        return false;
+    }
+
+    size_t index = 0;
+    const cJSON *item;
+    cJSON_ArrayForEach(item, items)
+    {
+        const cJSON *enabled = cJSON_GetObjectItemCaseSensitive(item, "enabled");
+        const cJSON *pid = cJSON_GetObjectItemCaseSensitive(item, "pid");
+        const cJSON *mask = cJSON_GetObjectItemCaseSensitive(item, "mask");
+        if (!cJSON_IsBool(enabled) || !cJSON_IsNumber(pid) || !cJSON_IsNumber(mask) ||
+            pid->valuedouble != pid->valueint || mask->valuedouble != mask->valueint ||
+            pid->valueint < 0 || pid->valueint > 0x1fff ||
+            mask->valueint < 0 || mask->valueint > 0x1fff)
+        {
+            return false;
+        }
+        filters[index].enabled = cJSON_IsTrue(enabled);
+        filters[index].pid = pid->valueint;
+        filters[index].mask = mask->valueint;
+        index++;
+    }
+    return true;
+}
+
+static esp_err_t filters_post_handler(httpd_req_t *req)
+{
+    cJSON *body = receive_json(req);
+    fpga_pid_filter_t filters[FPGA_PID_FILTER_COUNT] = {0};
+    if (!body || !parse_filter_request(body, filters))
+    {
+        cJSON_Delete(body);
+        return send_result(req, "400 Bad Request", false, "invalid_filter_request");
+    }
+    cJSON_Delete(body);
+
+    esp_err_t result = ts_stream_configure(filters);
+    if (result != ESP_OK)
+    {
+        return send_result(req, "502 Bad Gateway", false, "fpga_filter_write_failed");
+    }
+    return send_result(req, "200 OK", true, NULL);
+}
+
+static esp_err_t udp_post_handler(httpd_req_t *req)
+{
+    cJSON *body = receive_json(req);
+    const cJSON *enabled = body ? cJSON_GetObjectItemCaseSensitive(body, "enabled") : NULL;
+    const cJSON *rate = body ? cJSON_GetObjectItemCaseSensitive(body, "max_rate_kib_s") : NULL;
+    if (!cJSON_IsBool(enabled) ||
+        (rate && (!cJSON_IsNumber(rate) || rate->valuedouble < 0 || rate->valuedouble > 100000)))
+    {
+        cJSON_Delete(body);
+        return send_result(req, "400 Bad Request", false, "invalid_udp_request");
+    }
+
+    bool stream_enabled = cJSON_IsTrue(enabled);
+    uint32_t max_rate = rate ? (uint32_t)rate->valuedouble : 0;
+    cJSON_Delete(body);
+
+    if (ts_stream_set_udp(stream_enabled, max_rate) != ESP_OK)
+    {
+        return send_result(req, "500 Internal Server Error", false, "udp_config_failed");
+    }
+    return send_result(req, "200 OK", true, NULL);
+}
+
 static const httpd_uri_t routes[] = {
     {.uri = "/", .method = HTTP_GET, .handler = root_get_handler},
     {.uri = "/chan.jsn", .method = HTTP_GET, .handler = channels_get_handler},
     {.uri = "/favicon.ico", .method = HTTP_GET, .handler = favicon_get_handler},
     {.uri = "/api/v1/tuner", .method = HTTP_GET, .handler = tuner_get_handler},
+    {.uri = "/api/v1/tuner/retained-pid", .method = HTTP_GET, .handler = retained_pid_get_handler},
     {.uri = "/api/v1/tuner/init", .method = HTTP_POST, .handler = tuner_init_handler},
     {.uri = "/api/v1/tuner/tune", .method = HTTP_POST, .handler = tuner_tune_handler},
     {.uri = "/api/v1/tuner/reset", .method = HTTP_POST, .handler = tuner_reset_handler},
+    {.uri = "/api/v1/tuner/filters", .method = HTTP_GET, .handler = filters_get_handler},
+    {.uri = "/api/v1/tuner/filters", .method = HTTP_POST, .handler = filters_post_handler},
+    {.uri = "/api/v1/tuner/udp", .method = HTTP_POST, .handler = udp_post_handler},
+    {.uri = "/*", .method = HTTP_OPTIONS, .handler = options_handler},
 };
 
 esp_err_t web_start(void)
@@ -503,6 +731,7 @@ esp_err_t web_start(void)
     config.max_open_sockets = 4;
     config.max_uri_handlers = sizeof(routes) / sizeof(routes[0]);
     config.stack_size = 6144;
+    config.uri_match_fn = httpd_uri_match_wildcard;
 
     esp_err_t result = httpd_start(&server, &config);
     if (result != ESP_OK)

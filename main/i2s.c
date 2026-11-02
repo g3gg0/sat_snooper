@@ -1,13 +1,18 @@
 /* I2S slave driver for receiving framed data from the FPGA. */
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
+#include "esp_attr.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "i2s.h"
 #include "esp_log.h"
 #include "gpio_config.h" /* Provides GPIO definitions like GPIO_I2S_WS, etc. */
+#include "serial_protocol.h"
+#include "ts_stream.h"
 
 /* I2S peripheral number */
 #define I2S_PORT_NUM I2S_NUM_0
@@ -17,9 +22,10 @@
 #define FPGA_FRAME_TYPE_STATISTICS 0
 #define FPGA_FRAME_TYPE_PID_REPORT 1
 #define FPGA_FRAME_TYPE_PAT 2
-#define FPGA_STATISTICS_PAYLOAD_SIZE 12
+#define FPGA_FRAME_TYPE_FILTERED_TS 3
+#define FPGA_STATISTICS_PAYLOAD_SIZE 14
 #define FPGA_PID_REPORT_MAX_PAYLOAD_SIZE (1 + I2S_FPGA_MAX_PIDS * 2)
-#define FPGA_FRAME_MAX_PAYLOAD_SIZE I2S_FPGA_PAT_SIZE
+#define FPGA_FRAME_MAX_PAYLOAD_SIZE 255
 #define I2S_DIAGNOSTIC_INTERVAL_MS 1000
 #define I2S_READ_TIMEOUT_MS 250
 #define I2S_DIAGNOSTIC_SAMPLE_SIZE 16
@@ -30,6 +36,22 @@ static portMUX_TYPE statistics_lock = portMUX_INITIALIZER_UNLOCKED;
 static i2s_fpga_statistics_t fpga_statistics;
 static i2s_fpga_pid_report_t fpga_pid_report;
 static i2s_fpga_pat_t fpga_pat;
+
+typedef struct {
+    bool available;
+    uint16_t pid;
+    uint8_t write_index;
+    uint8_t packet_count;
+    uint32_t packets_received;
+    uint32_t continuity_errors;
+    bool continuity_valid;
+    uint8_t continuity_counter;
+    uint32_t last_use;
+} control_pid_ring_t;
+
+static control_pid_ring_t control_pid_rings[I2S_RETAINED_PID_SLOT_COUNT];
+static uint32_t control_pid_use_counter;
+static uint8_t *control_pid_packet_storage;
 
 typedef enum {
     FRAME_READ_TYPE,
@@ -57,6 +79,7 @@ typedef struct {
     uint32_t statistics_frame_count;
     uint32_t pid_report_frame_count;
     uint32_t pat_frame_count;
+    uint32_t filtered_ts_frame_count;
     uint8_t non_idle_sample[I2S_DIAGNOSTIC_SAMPLE_SIZE];
     uint8_t non_idle_sample_size;
 } i2s_diagnostics_t;
@@ -75,6 +98,7 @@ static void store_statistics_frame(const uint8_t *payload)
     fpga_statistics.sync_count = read_le32(payload);
     fpga_statistics.data_bytes_received = read_le32(payload + 4);
     fpga_statistics.sync_byte_errors = read_le32(payload + 8);
+    fpga_statistics.filtered_drops = (uint16_t)payload[12] | ((uint16_t)payload[13] << 8);
     fpga_statistics.available = true;
     portEXIT_CRITICAL(&statistics_lock);
 }
@@ -96,14 +120,17 @@ static void store_pid_report_frame(const uint8_t *payload, uint8_t length)
     fpga_pid_report.available = true;
     portEXIT_CRITICAL(&statistics_lock);
 
-    offset += snprintf(pid_line + offset, sizeof(pid_line) - offset,
-                       "Seen PIDs%s:", payload[0] ? " (truncated)" : "");
-    for (uint8_t index = 0; index < count && offset < sizeof(pid_line); index++)
+    if(0)
     {
         offset += snprintf(pid_line + offset, sizeof(pid_line) - offset,
-                           " %04x", (unsigned int)fpga_pid_report.pids[index]);
+                        "Seen PIDs%s:", payload[0] ? " (truncated)" : "");
+        for (uint8_t index = 0; index < count && offset < sizeof(pid_line); index++)
+        {
+            offset += snprintf(pid_line + offset, sizeof(pid_line) - offset,
+                            " %04x", (unsigned int)fpga_pid_report.pids[index]);
+        }
+        ESP_LOGD(TAG, "%s", pid_line);
     }
-    ESP_LOGI(TAG, "%s", pid_line);
 }
 
 static void store_pat_frame(const uint8_t *payload)
@@ -111,6 +138,76 @@ static void store_pat_frame(const uint8_t *payload)
     portENTER_CRITICAL(&statistics_lock);
     memcpy(fpga_pat.data, payload, I2S_FPGA_PAT_SIZE);
     fpga_pat.available = true;
+    portEXIT_CRITICAL(&statistics_lock);
+}
+
+static void retain_control_pid_packet(const uint8_t packet[TS_PACKET_SIZE])
+{
+    uint16_t pid = ((uint16_t)(packet[1] & 0x1f) << 8) | packet[2];
+    if (!control_pid_packet_storage)
+    {
+        return;
+    }
+
+    uint8_t adaptation_control = (packet[3] >> 4) & 0x03;
+    if (adaptation_control == 0)
+    {
+        return;
+    }
+
+    portENTER_CRITICAL(&statistics_lock);
+    control_pid_ring_t *ring = NULL;
+    control_pid_ring_t *free_ring = NULL;
+    control_pid_ring_t *oldest_ring = &control_pid_rings[0];
+    for (size_t index = 0; index < I2S_RETAINED_PID_SLOT_COUNT; index++)
+    {
+        if (control_pid_rings[index].available && control_pid_rings[index].pid == pid)
+        {
+            ring = &control_pid_rings[index];
+            break;
+        }
+        if (!free_ring && !control_pid_rings[index].available)
+        {
+            free_ring = &control_pid_rings[index];
+        }
+        if (control_pid_rings[index].last_use < oldest_ring->last_use)
+        {
+            oldest_ring = &control_pid_rings[index];
+        }
+    }
+    /* Slots are never freed, so recycle the stalest one for a newly filtered PID */
+    if (!ring)
+    {
+        ring = free_ring ? free_ring : oldest_ring;
+    }
+    if (!ring->available || ring->pid != pid)
+    {
+        memset(ring, 0, sizeof(*ring));
+        ring->available = true;
+        ring->pid = pid;
+    }
+    ring->last_use = ++control_pid_use_counter;
+    if (adaptation_control & 0x01)
+    {
+        uint8_t continuity_counter = packet[3] & 0x0f;
+        if (ring->continuity_valid && continuity_counter != ring->continuity_counter &&
+            continuity_counter != ((ring->continuity_counter + 1) & 0x0f))
+        {
+            ring->continuity_errors++;
+        }
+        ring->continuity_counter = continuity_counter;
+        ring->continuity_valid = true;
+    }
+    size_t ring_index = ring - control_pid_rings;
+    size_t packet_offset = (ring_index * I2S_RETAINED_PID_PACKET_CAPACITY +
+                            ring->write_index) * TS_PACKET_SIZE;
+    memcpy(control_pid_packet_storage + packet_offset, packet, TS_PACKET_SIZE);
+    ring->write_index = (ring->write_index + 1) % I2S_RETAINED_PID_PACKET_CAPACITY;
+    if (ring->packet_count < I2S_RETAINED_PID_PACKET_CAPACITY)
+    {
+        ring->packet_count++;
+    }
+    ring->packets_received++;
     portEXIT_CRITICAL(&statistics_lock);
 }
 
@@ -125,6 +222,8 @@ static bool frame_length_is_valid(uint8_t type, uint8_t length)
                ((length - 1) % 2) == 0;
     case FPGA_FRAME_TYPE_PAT:
         return length == I2S_FPGA_PAT_SIZE;
+    case FPGA_FRAME_TYPE_FILTERED_TS:
+        return length == TS_PACKET_SIZE;
     default:
         return false;
     }
@@ -135,7 +234,7 @@ static void parse_frame_byte(frame_parser_t *parser, i2s_diagnostics_t *diagnost
     switch (parser->state)
     {
     case FRAME_READ_TYPE:
-        if (byte <= FPGA_FRAME_TYPE_PAT)
+        if (byte <= FPGA_FRAME_TYPE_FILTERED_TS)
         {
             diagnostics->header_candidate_count++;
             parser->type = byte;
@@ -175,7 +274,14 @@ static void parse_frame_byte(frame_parser_t *parser, i2s_diagnostics_t *diagnost
                 diagnostics->pat_frame_count++;
                 ESP_LOGI(TAG, "Received PAT packet");
                 break;
+            case FPGA_FRAME_TYPE_FILTERED_TS:
+                retain_control_pid_packet(parser->payload);
+                ts_stream_submit_packet(parser->payload);
+                diagnostics->filtered_ts_frame_count++;
+                break;
             }
+            serial_protocol_send_fpga_frame(parser->type, parser->payload,
+                                            parser->length);
             parser->state = FRAME_READ_TYPE;
         }
         break;
@@ -210,8 +316,8 @@ static void log_i2s_diagnostics(const frame_parser_t *parser, i2s_diagnostics_t 
     i2s_fpga_statistics_t statistics;
     i2s_get_fpga_statistics(&statistics);
 
-    ESP_LOGI(TAG,
-             "RX reads=%u timeouts=%u bytes=%u non-idle=%u zero=%u len12=%u parser=%u candidates=%u rejected=%u frames=%u/%u/%u",
+    ESP_LOGD(TAG,
+             "RX reads=%u timeouts=%u bytes=%u non-idle=%u zero=%u len12=%u parser=%u candidates=%u rejected=%u frames=%u/%u/%u/%u",
              (unsigned int)diagnostics->read_count,
              (unsigned int)diagnostics->timeout_count,
              (unsigned int)diagnostics->byte_count,
@@ -223,20 +329,22 @@ static void log_i2s_diagnostics(const frame_parser_t *parser, i2s_diagnostics_t 
              (unsigned int)diagnostics->rejected_length_count,
              (unsigned int)diagnostics->statistics_frame_count,
              (unsigned int)diagnostics->pid_report_frame_count,
-             (unsigned int)diagnostics->pat_frame_count);
+             (unsigned int)diagnostics->pat_frame_count,
+             (unsigned int)diagnostics->filtered_ts_frame_count);
 
     if (diagnostics->non_idle_sample_size > 0)
     {
         ESP_LOG_BUFFER_HEX_LEVEL(TAG, diagnostics->non_idle_sample,
-                                 diagnostics->non_idle_sample_size, ESP_LOG_INFO);
+                                 diagnostics->non_idle_sample_size, ESP_LOG_DEBUG);
     }
 
     if (statistics.available)
     {
-        ESP_LOGI(TAG, "Latest FPGA statistics: sync=%u data-bytes=%u sync-errors=%u",
+        ESP_LOGD(TAG, "Latest FPGA statistics: sync=%u data-bytes=%u sync-errors=%u drops=%u",
                  (unsigned int)statistics.sync_count,
-             (unsigned int)statistics.data_bytes_received,
-             (unsigned int)statistics.sync_byte_errors);
+                 (unsigned int)statistics.data_bytes_received,
+                 (unsigned int)statistics.sync_byte_errors,
+                 (unsigned int)statistics.filtered_drops);
     }
     else
     {
@@ -282,6 +390,70 @@ void i2s_get_fpga_pat(i2s_fpga_pat_t *pat)
     portEXIT_CRITICAL(&statistics_lock);
 }
 
+void i2s_get_retained_pid_buffers(i2s_retained_pid_buffer_t buffers[I2S_RETAINED_PID_SLOT_COUNT])
+{
+    if (!buffers)
+    {
+        return;
+    }
+
+    portENTER_CRITICAL(&statistics_lock);
+    for (size_t index = 0; index < I2S_RETAINED_PID_SLOT_COUNT; index++)
+    {
+        buffers[index].available = control_pid_rings[index].available;
+        buffers[index].pid = control_pid_rings[index].pid;
+        buffers[index].packet_count = control_pid_rings[index].packet_count;
+        buffers[index].packets_received = control_pid_rings[index].packets_received;
+        buffers[index].continuity_errors = control_pid_rings[index].continuity_errors;
+    }
+    portEXIT_CRITICAL(&statistics_lock);
+}
+
+size_t i2s_copy_retained_pid_packets(uint16_t pid, uint8_t *packets, size_t capacity)
+{
+    if (!packets || !control_pid_packet_storage)
+    {
+        return 0;
+    }
+
+    portENTER_CRITICAL(&statistics_lock);
+    const control_pid_ring_t *ring = NULL;
+    size_t ring_index = 0;
+    for (; ring_index < I2S_RETAINED_PID_SLOT_COUNT; ring_index++)
+    {
+        if (control_pid_rings[ring_index].available && control_pid_rings[ring_index].pid == pid)
+        {
+            ring = &control_pid_rings[ring_index];
+            break;
+        }
+    }
+    if (!ring)
+    {
+        portEXIT_CRITICAL(&statistics_lock);
+        return 0;
+    }
+    size_t packet_count = ring->packet_count;
+    if (capacity < packet_count)
+    {
+        portEXIT_CRITICAL(&statistics_lock);
+        return 0;
+    }
+
+    uint8_t oldest_index = packet_count == I2S_RETAINED_PID_PACKET_CAPACITY
+                               ? ring->write_index
+                               : 0;
+    for (size_t index = 0; index < packet_count; index++)
+    {
+        size_t source_offset = (ring_index * I2S_RETAINED_PID_PACKET_CAPACITY +
+                    ((oldest_index + index) % I2S_RETAINED_PID_PACKET_CAPACITY)) *
+                               TS_PACKET_SIZE;
+        memcpy(packets + index * TS_PACKET_SIZE,
+               control_pid_packet_storage + source_offset, TS_PACKET_SIZE);
+    }
+    portEXIT_CRITICAL(&statistics_lock);
+    return packet_count;
+}
+
 /**
  * @brief Initializes the I2S peripheral in slave RX mode using the standard driver API.
  *
@@ -289,6 +461,17 @@ void i2s_get_fpga_pat(i2s_fpga_pat_t *pat)
  */
 esp_err_t i2s_init(void)
 {
+    control_pid_packet_storage = heap_caps_malloc(
+        I2S_RETAINED_PID_SLOT_COUNT * I2S_RETAINED_PID_PACKET_CAPACITY * TS_PACKET_SIZE,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!control_pid_packet_storage)
+    {
+        ESP_LOGE(TAG, "Failed to allocate control PID packet storage in PSRAM");
+        return ESP_ERR_NO_MEM;
+    }
+    memset(control_pid_packet_storage, 0,
+            I2S_RETAINED_PID_SLOT_COUNT * I2S_RETAINED_PID_PACKET_CAPACITY * TS_PACKET_SIZE);
+
     gpio_set_direction(GPIO_I2S_BCK, GPIO_MODE_INPUT);
     gpio_set_direction(GPIO_I2S_WS, GPIO_MODE_INPUT);
     gpio_set_direction(GPIO_I2S_DAT, GPIO_MODE_INPUT);
@@ -377,7 +560,7 @@ esp_err_t i2s_init(void)
 
 #define I2S_READ_BUF_SIZE 188
 
-uint8_t i2s_rx_buffer[I2S_READ_BUF_SIZE];
+DRAM_ATTR uint8_t i2s_rx_buffer[I2S_READ_BUF_SIZE];
 size_t bytes_read;
 
 void i2s_read_task(void *arg)

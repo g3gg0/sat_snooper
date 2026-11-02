@@ -30,10 +30,44 @@
 #define SOCKET_RX_BUFFER_INITIAL_SIZE 1024
 #define SOCKET_LISTENER_TASK_STACK_SIZE 4096
 #define SOCKET_LISTENER_TASK_PRIORITY 5
+#define FPGA_PID_FILTER_COMMAND 0xf0
 
 static const char *TAG = "FPGA";
 
 static bool fpga_prog_active = false;
+
+esp_err_t fpga_set_pid_filters(const fpga_pid_filter_t filters[FPGA_PID_FILTER_COUNT])
+{
+    if (!filters)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t command[2 + FPGA_PID_FILTER_COUNT * 4] = {FPGA_PID_FILTER_COMMAND, 0};
+    for (size_t index = 0; index < FPGA_PID_FILTER_COUNT; index++)
+    {
+        if (filters[index].pid > 0x1fff || filters[index].mask > 0x1fff)
+        {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (filters[index].enabled)
+        {
+            command[1] |= 1U << index;
+        }
+        size_t offset = 2 + index * 4;
+        command[offset] = filters[index].pid >> 8;
+        command[offset + 1] = filters[index].pid;
+        command[offset + 2] = filters[index].mask >> 8;
+        command[offset + 3] = filters[index].mask;
+    }
+
+    if (i2c_write(FPGA_ADDR_USER_PRIMARY, command, sizeof(command)) != 0)
+    {
+        ESP_LOGE(TAG, "Failed to write PID filters to FPGA");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
 
 void fpga_prog(bool active)
 {

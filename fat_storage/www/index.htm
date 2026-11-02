@@ -138,6 +138,25 @@
             font-size: 12px;
         }
 
+        .server-field {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            color: var(--muted);
+            font: 11px "Cascadia Code", monospace;
+        }
+
+        .server-field input {
+            width: 210px;
+            min-height: var(--control-height);
+            padding: 0 10px;
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            color: var(--text);
+            background: var(--surface-raised);
+            font: 12px "Cascadia Code", monospace;
+        }
+
         .switch-control input {
             appearance: none;
             width: 42px;
@@ -187,6 +206,43 @@
         h1, h2 { font-size: 16px; font-weight: 650; }
         .section-head span { color: var(--muted); font: 11px "Cascadia Code", monospace; }
 
+        .section-head-actions { display: flex; align-items: center; gap: 10px; }
+
+        .collapse-toggle {
+            min-height: 24px;
+            padding: 0 10px;
+            border-radius: 3px;
+            color: var(--muted);
+            font: 11px "Cascadia Code", monospace;
+        }
+
+        .channels.collapsed .channel-list { display: none; }
+
+        .heap-plot-panel.collapsed .heap-plot-body { display: none; }
+        .heap-plot-body { margin-top: 4px; }
+        .heap-plot-body canvas {
+            display: block;
+            width: 100%;
+            height: 130px;
+            border: 1px solid var(--line-soft);
+            border-radius: 4px;
+            background: var(--surface);
+        }
+        .heap-legend {
+            display: flex;
+            gap: 16px;
+            margin-top: 8px;
+            color: var(--muted);
+            font: 11px "Cascadia Code", monospace;
+        }
+        .heap-legend i {
+            display: inline-block;
+            width: 10px;
+            height: 2px;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+
         .form-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -204,7 +260,7 @@
             text-transform: uppercase;
         }
 
-        input[type="number"], select {
+        input[type="number"], input[type="text"], select {
             width: 100%;
             height: var(--control-height);
             border: 1px solid var(--line);
@@ -214,7 +270,7 @@
             background: var(--surface-raised);
         }
 
-        input[type="number"] { font-family: "Cascadia Code", monospace; }
+        input[type="number"], input[type="text"] { font-family: "Cascadia Code", monospace; }
 
         .segment {
             height: var(--control-height);
@@ -247,6 +303,40 @@
             padding-top: 22px;
             border-top: 1px solid var(--line-soft);
         }
+
+        .service-discovery {
+            margin-top: 30px;
+            padding-top: 24px;
+            border-top: 1px solid var(--line);
+        }
+
+        .collapsible-section > summary {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+            cursor: pointer;
+            list-style: none;
+        }
+        .collapsible-section > summary::-webkit-details-marker { display: none; }
+        .collapsible-section > summary::after { content: "+"; color: var(--cyan); font: 18px/1 "Cascadia Code", monospace; }
+        .collapsible-section[open] > summary::after { content: "-"; }
+        .collapsible-section > summary h2 { font-size: 16px; }
+        .collapsible-section > summary span { color: var(--muted); font: 11px "Cascadia Code", monospace; margin-left: auto; }
+        .collapsible-content { padding-top: 14px; }
+        .service-status { color: var(--muted); font-size: 12px; }
+        .service-status.error { color: var(--danger); }
+        .service-table-wrap { overflow-x: auto; margin-top: 14px; }
+        .service-stream-group + .service-stream-group { margin-top: 22px; }
+        .service-stream-title { margin: 0 0 8px; color: var(--muted); font: 11px "Cascadia Code", monospace; }
+        .service-stream-group.current { border-left: 3px solid var(--signal); padding-left: 12px; }
+        .service-stream-group.current .service-stream-title { color: var(--signal); }
+        .service-table { width: 100%; border-collapse: collapse; font: 12px "Cascadia Code", monospace; }
+        .service-table th, .service-table td { padding: 9px 8px; border-bottom: 1px solid var(--line-soft); text-align: left; }
+        .service-table th { color: var(--muted); font-size: 10px; font-weight: 500; text-transform: uppercase; }
+        .service-table td:first-child { color: var(--signal); }
+        .control-pid-details { margin-top: 14px; }
+        .control-pid-details pre { max-height: 260px; overflow: auto; padding: 10px; background: var(--surface-raised); border: 1px solid var(--line-soft); color: var(--muted); font: 11px/1.5 "Cascadia Code", monospace; white-space: pre-wrap; word-break: break-all; }
 
         .form-actions .primary { min-width: 132px; }
         #commandResult { color: var(--muted); font: 12px "Cascadia Code", monospace; }
@@ -372,7 +462,7 @@
         .metric.changed { animation: metric-flash 700ms ease-out; }
         .metric.changed strong { animation: value-flash 700ms ease-out; }
 
-        .decoder-backdrop {
+        .decoder-backdrop, .pid-drawer-backdrop {
             position: fixed;
             inset: 0;
             z-index: 20;
@@ -382,7 +472,7 @@
             transition: opacity 180ms ease, visibility 180ms ease;
         }
 
-        .pat-decoder {
+        .pat-decoder, .pid-drawer {
             position: absolute;
             top: 0;
             right: 0;
@@ -396,9 +486,9 @@
             transition: transform 220ms ease;
         }
 
-        body.decoder-open { overflow: hidden; }
-        body.decoder-open .decoder-backdrop { visibility: visible; opacity: 1; }
-        body.decoder-open .pat-decoder { transform: translateX(0); }
+        body.decoder-open, body.pid-drawer-open { overflow: hidden; }
+        body.decoder-open .decoder-backdrop, body.pid-drawer-open .pid-drawer-backdrop { visibility: visible; opacity: 1; }
+        body.decoder-open .pat-decoder, body.pid-drawer-open .pid-drawer { transform: translateX(0); }
 
         .decoder-head {
             display: flex;
@@ -426,6 +516,53 @@
         .decoder-table th, .decoder-table td { padding: 10px 8px; border-bottom: 1px solid var(--line-soft); text-align: left; }
         .decoder-table th { color: var(--muted); font-size: 10px; font-weight: 500; text-transform: uppercase; }
         .decoder-table td:last-child { color: var(--signal); }
+        .decoder-program-row { cursor: pointer; }
+        .decoder-program-row:hover td, .decoder-program-row:focus-visible td { background: var(--surface-raised); }
+        .decoder-program-row:focus-visible { outline: 1px solid var(--cyan); outline-offset: -1px; }
+        .decoder-stream-toggle { width: 18px; height: 18px; accent-color: var(--signal); }
+        .decoder-note { margin: 10px 0 0; color: var(--muted); font: 10px/1.5 "Cascadia Code", monospace; }
+        .decoder-status { margin: 0; color: var(--muted); font: 11px/1.6 "Cascadia Code", monospace; }
+        .decoder-status.error { color: var(--danger); }
+
+        .filter-form { margin-top: 12px; }
+        .filter-row {
+            display: grid;
+            grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr);
+            gap: 10px;
+            align-items: end;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--line-soft);
+        }
+        .filter-row-head { padding: 0 0 6px; color: var(--muted); font-size: 10px; text-transform: uppercase; }
+        .filter-row label span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; }
+        .filter-row input[type="text"] { width: 100%; height: 36px; padding: 0 9px; }
+        .filter-enable { display: grid; place-items: center; height: 36px; }
+        .filter-enable input { width: 18px; height: 18px; accent-color: var(--signal); }
+        .filter-actions { display: flex; align-items: center; gap: 12px; padding-top: 14px; }
+        .filter-actions button { min-height: 36px; }
+        .filter-actions output { color: var(--muted); font: 11px "Cascadia Code", monospace; }
+        .filter-actions output.ok { color: var(--signal); }
+        .filter-actions output.error { color: var(--danger); }
+
+        .udp-form {
+            display: grid;
+            grid-template-columns: 44px minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: end;
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid var(--line-soft);
+        }
+        .udp-form label span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; }
+        .udp-form input[type="number"] { width: 100%; height: 36px; padding: 0 9px; }
+        .udp-form button { min-height: 36px; }
+        .udp-form output { grid-column: 1 / -1; color: var(--muted); font: 11px "Cascadia Code", monospace; }
+        .udp-form output.ok { color: var(--signal); }
+        .udp-form output.error { color: var(--danger); }
+        .filter-stream { padding: 14px 0; border-bottom: 1px solid var(--line-soft); }
+        .filter-stream-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+        .filter-stream-head strong, .filter-stream-head span { font: 11px "Cascadia Code", monospace; }
+        .filter-stream-head span { color: var(--muted); text-align: right; }
 
         .statistics-group {
             margin-top: 30px;
@@ -501,6 +638,7 @@
             .connection span { display: none; }
             .pat-decoder { width: 100%; padding: 20px 18px; }
             .decoder-grid { grid-template-columns: 1fr; }
+            .filter-row { grid-template-columns: 36px minmax(0, 1fr) minmax(0, 1fr); gap: 7px; }
         }
     </style>
 </head>
@@ -514,6 +652,7 @@
             <i class="connection-dot"></i>
             <span>API OFFLINE</span>
         </div>
+        <button type="button" id="serialButton">Open via serial</button>
     </header>
 
     <div class="hardware-bar">
@@ -521,6 +660,11 @@
             <i class="state-mark"></i>
             <span>Tuner not initialized</span>
         </div>
+        <label class="server-field">
+            SERVER
+            <input type="text" id="serverAddress" spellcheck="false" autocomplete="off"
+                   placeholder="http://sat-snooper.local" aria-label="Server base address">
+        </label>
         <label class="switch-control">
             RESET
             <input type="checkbox" id="resetToggle" aria-label="Hold tuner in reset">
@@ -531,10 +675,15 @@
 
     <main>
         <section>
-            <div class="channels">
+            <div class="channels" id="channels">
                 <div class="section-head">
                     <h1>Channel Shortcuts</h1>
-                    <span id="channelCount">LOADING</span>
+                    <div class="section-head-actions">
+                        <span id="channelCount">LOADING</span>
+                        <button type="button" class="collapse-toggle" id="channelRefresh">RELOAD</button>
+                        <button type="button" class="collapse-toggle" id="channelToggle"
+                                aria-expanded="true" aria-controls="channelList">HIDE</button>
+                    </div>
                 </div>
                 <div class="channel-list" id="channelList">
                     <span>Loading chan.jsn...</span>
@@ -610,6 +759,29 @@
                     <output id="commandResult">Idle</output>
                 </div>
             </form>
+
+            <details class="service-discovery collapsible-section" open>
+                <summary>
+                    <h2>Found Services</h2>
+                    <span>SDT PID 0x0011</span>
+                </summary>
+                <div class="collapsible-content">
+                    <p class="service-status" id="serviceStatus">Waiting for an SDT packet.</p>
+                    <div class="service-table-wrap" id="serviceTable"></div>
+                </div>
+            </details>
+
+            <details class="service-discovery collapsible-section">
+                <summary>
+                    <h2>Observed Control PIDs</h2>
+                    <span>PID 0x0000–0x001F</span>
+                </summary>
+                <div class="collapsible-content">
+                    <p class="service-status" id="controlPidStatus">Waiting for a PID report.</p>
+                    <div class="service-table-wrap" id="controlPidTable"></div>
+                    <div class="control-pid-details" id="controlPidDetails"></div>
+                </div>
+            </details>
         </section>
 
         <aside>
@@ -651,6 +823,28 @@
                 <div class="metric" id="firmwareRunningMetric"><span>Firmware state</span><strong id="firmwareRunning">N/A</strong></div>
                 <div class="metric" id="firmwareVersionMetric"><span>Firmware version</span><strong id="firmwareVersion">N/A</strong></div>
                 <div class="metric" id="chipIdMetric"><span>Chip ID</span><strong id="chipId">N/A</strong></div>
+                <div class="metric" id="heapInternalMetric"><span>Free internal heap</span><strong class="compact" id="heapInternal">N/A</strong></div>
+                <div class="metric" id="heapSpiramMetric"><span>Free SPIRAM</span><strong class="compact" id="heapSpiram">N/A</strong></div>
+                <div class="metric" id="uptimeMetric"><span>Uptime</span><strong class="compact" id="uptime">N/A</strong></div>
+            </div>
+
+            <div class="statistics-group heap-plot-panel" id="heapPlotPanel">
+                <div class="section-head">
+                    <h2>Heap History</h2>
+                    <div class="section-head-actions">
+                        <span id="heapPlotRange">NO DATA</span>
+                        <button type="button" class="collapse-toggle" id="heapPlotToggle"
+                                aria-expanded="true" aria-controls="heapPlotBody">HIDE</button>
+                    </div>
+                </div>
+                <div class="heap-plot-body" id="heapPlotBody">
+                    <canvas id="heapPlot" width="600" height="260"></canvas>
+                    <div class="heap-legend">
+                        <span><i style="background: var(--signal)"></i>Internal</span>
+                        <span><i style="background: var(--cyan)"></i>SPIRAM</span>
+                        <span><i style="background: var(--amber)"></i>Largest internal block</span>
+                    </div>
+                </div>
             </div>
 
             <div class="statistics-group">
@@ -662,7 +856,14 @@
                     <div class="metric" id="fpgaSyncMetric"><span>Sync count</span><strong id="fpgaSync">N/A</strong></div>
                     <div class="metric" id="fpgaDataBytesMetric"><span>Valid data received</span><strong id="fpgaDataBytes">N/A</strong></div>
                     <div class="metric" id="fpgaSyncErrorsMetric"><span>Sync-byte errors</span><strong id="fpgaSyncErrors">N/A</strong></div>
-                    <div class="metric block" id="fpgaPidsMetric"><span>PIDs seen in last report cycle</span><strong class="compact" id="fpgaPids">N/A</strong></div>
+                    <div class="metric" id="fpgaFilteredDropsMetric"><span>FPGA mailbox drops</span><strong id="fpgaFilteredDrops">N/A</strong></div>
+                    <div class="metric block" id="fpgaPidsMetric">
+                        <div class="metric-title-row">
+                            <span>PIDs seen on current transport stream</span>
+                            <button class="icon-button" id="pidDrawerOpen" type="button" title="Open PID list" aria-label="Open PID list">»</button>
+                        </div>
+                        <strong class="compact" id="fpgaPids">N/A</strong>
+                    </div>
                     <div class="metric block" id="fpgaPatMetric">
                         <div class="metric-title-row">
                             <span>Last PAT packet</span>
@@ -671,6 +872,55 @@
                         <pre class="telemetry-dump" id="fpgaPat">N/A</pre>
                     </div>
                 </div>
+            </div>
+
+            <div class="statistics-group">
+                <div class="section-head">
+                    <h2>PID Filters</h2>
+                    <span>PAT UI ALWAYS ON · UDP MANUAL · :1234 · 1 HZ UI</span>
+                </div>
+                <form class="filter-form" id="filterForm">
+                    <div class="filter-row filter-row-head"><span>On</span><span>PID</span><span>Bitmask</span></div>
+                    <div class="filter-row">
+                        <label class="filter-enable" title="Enable filter 1"><input id="filterEnabled0" type="checkbox" aria-label="Enable filter 1"></label>
+                        <label><span>Filter 1 PID</span><input id="filterPid0" type="text" value="0x0000" maxlength="6" spellcheck="false"></label>
+                        <label><span>Filter 1 mask</span><input id="filterMask0" type="text" value="0x1FFF" maxlength="6" spellcheck="false"></label>
+                    </div>
+                    <div class="filter-row">
+                        <label class="filter-enable" title="Enable filter 2"><input id="filterEnabled1" type="checkbox" aria-label="Enable filter 2"></label>
+                        <label><span>Filter 2 PID</span><input id="filterPid1" type="text" value="0x0000" maxlength="6" spellcheck="false"></label>
+                        <label><span>Filter 2 mask</span><input id="filterMask1" type="text" value="0x1FFF" maxlength="6" spellcheck="false"></label>
+                    </div>
+                    <div class="filter-row">
+                        <label class="filter-enable" title="Enable filter 3"><input id="filterEnabled2" type="checkbox" aria-label="Enable filter 3"></label>
+                        <label><span>Filter 3 PID</span><input id="filterPid2" type="text" value="0x0000" maxlength="6" spellcheck="false"></label>
+                        <label><span>Filter 3 mask</span><input id="filterMask2" type="text" value="0x1FFF" maxlength="6" spellcheck="false"></label>
+                    </div>
+                    <div class="filter-row">
+                        <label class="filter-enable" title="Enable filter 4"><input id="filterEnabled3" type="checkbox" aria-label="Enable filter 4"></label>
+                        <label><span>Filter 4 PID</span><input id="filterPid3" type="text" value="0x0000" maxlength="6" spellcheck="false"></label>
+                        <label><span>Filter 4 mask</span><input id="filterMask3" type="text" value="0x1FFF" maxlength="6" spellcheck="false"></label>
+                    </div>
+                    <div class="filter-actions">
+                        <button class="primary" type="submit">Apply filters</button>
+                        <output id="filterResult">Not configured</output>
+                    </div>
+                </form>
+                <form class="udp-form" id="udpForm">
+                    <label class="filter-enable" title="Enable UDP broadcast">
+                        <input id="udpEnabled" type="checkbox" aria-label="Enable UDP broadcast">
+                    </label>
+                    <label>
+                        <span>UDP rate limit / KiB/s (0 = unlimited)</span>
+                        <input id="udpRate" type="number" min="0" max="100000" step="1" value="0">
+                    </label>
+                    <button class="primary" type="submit">Apply stream</button>
+                    <output id="udpResult">Not configured</output>
+                </form>
+                <div class="metrics">
+                    <div class="metric" id="udpStateMetric"><span>UDP broadcast</span><strong class="compact" id="udpState">N/A</strong></div>
+                </div>
+                <div id="filterStreams"></div>
             </div>
 
             <div class="raw">
@@ -684,8 +934,8 @@
         <div class="pat-decoder" role="dialog" aria-modal="true" aria-labelledby="patDecoderTitle">
             <div class="decoder-head">
                 <div>
-                    <h2 id="patDecoderTitle">PAT Decoder</h2>
-                    <span>MPEG-TS PROGRAM ASSOCIATION TABLE</span>
+                    <h2 id="patDecoderTitle">PAT / PMT Decoder</h2>
+                    <span>MPEG-TS PROGRAM AND STREAM SELECTION</span>
                 </div>
                 <button class="icon-button decoder-close" id="patDecoderClose" type="button" title="Close PAT decoder" aria-label="Close PAT decoder">×</button>
             </div>
@@ -693,14 +943,44 @@
         </div>
     </div>
 
+    <div class="pid-drawer-backdrop" id="pidDrawerBackdrop">
+        <div class="pid-drawer" role="dialog" aria-modal="true" aria-labelledby="pidDrawerTitle">
+            <div class="decoder-head">
+                <div>
+                    <h2 id="pidDrawerTitle">PIDs</h2>
+                    <span id="pidDrawerSubtitle">WAITING FOR PAT</span>
+                </div>
+                <button class="icon-button decoder-close" id="pidDrawerClose" type="button" title="Close PID list" aria-label="Close PID list">×</button>
+            </div>
+            <div id="pidDrawerBody" class="decoder-empty">No PID report available.</div>
+        </div>
+    </div>
+
     <script>
-        const API = "/api/v1/tuner";
+        const API_PATH = "/api/v1/tuner";
+        const serverAddressStorageKey = "sat-snooper-server-address";
+        const channelCollapseStorageKey = "sat-snooper-channels-collapsed";
+
+        /* Empty base means same-origin, which is the case when served from the device */
+        function normalizeServerAddress(value) {
+            const trimmed = (value || "").trim();
+            if (!trimmed) return "";
+            const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+            return withScheme.replace(/\/+$/, "");
+        }
+
+        let serverBase = normalizeServerAddress(localStorage.getItem(serverAddressStorageKey));
+
         const elements = {
             connection: document.getElementById("connectionState"),
             hardware: document.getElementById("hardwareState"),
             init: document.getElementById("initButton"),
             refresh: document.getElementById("refreshButton"),
             reset: document.getElementById("resetToggle"),
+            server: document.getElementById("serverAddress"),
+            channelsPanel: document.getElementById("channels"),
+            channelToggle: document.getElementById("channelToggle"),
+            channelRefresh: document.getElementById("channelRefresh"),
             form: document.getElementById("tuneForm"),
             tune: document.getElementById("tuneButton"),
             result: document.getElementById("commandResult"),
@@ -713,10 +993,225 @@
             patDecoderOpen: document.getElementById("patDecoderOpen"),
             patDecoderClose: document.getElementById("patDecoderClose"),
             patDecoderBackdrop: document.getElementById("patDecoderBackdrop"),
-            patDecoderBody: document.getElementById("patDecoderBody")
+            patDecoderBody: document.getElementById("patDecoderBody"),
+            pidDrawerOpen: document.getElementById("pidDrawerOpen"),
+            pidDrawerClose: document.getElementById("pidDrawerClose"),
+            pidDrawerBackdrop: document.getElementById("pidDrawerBackdrop"),
+            pidDrawerBody: document.getElementById("pidDrawerBody"),
+            pidDrawerSubtitle: document.getElementById("pidDrawerSubtitle"),
+            filterForm: document.getElementById("filterForm"),
+            filterResult: document.getElementById("filterResult"),
+            filterStreams: document.getElementById("filterStreams"),
+            udpState: document.getElementById("udpState"),
+            udpForm: document.getElementById("udpForm"),
+            udpEnabled: document.getElementById("udpEnabled"),
+            udpRate: document.getElementById("udpRate"),
+            udpResult: document.getElementById("udpResult"),
+            heapPlotPanel: document.getElementById("heapPlotPanel"),
+            heapPlotToggle: document.getElementById("heapPlotToggle"),
+            heapPlotRange: document.getElementById("heapPlotRange"),
+            heapPlot: document.getElementById("heapPlot")
+            ,serviceStatus: document.getElementById("serviceStatus")
+            ,serviceTable: document.getElementById("serviceTable")
+            ,controlPidStatus: document.getElementById("controlPidStatus")
+            ,controlPidTable: document.getElementById("controlPidTable")
+            ,controlPidDetails: document.getElementById("controlPidDetails")
+            ,serial: document.getElementById("serialButton")
         };
 
         let latestPatHex = null;
+        let currentPatTransportStreamId = null;
+        let pidTransportStreamId = null;
+        const pidsForCurrentTransportStream = new Set();
+        const servicesByTransportStream = new Map();
+        const serviceMapStorageKey = "sat-snooper-sdt-services";
+        const decodedSdtSections = new Set();
+        let filterControlsLoaded = false;
+        let udpControlsLoaded = false;
+        const heapPlotStorageKey = "sat-snooper-heap-plot-collapsed";
+        const heapHistoryLimit = 600;
+        const heapHistory = { internal: [], spiram: [], block: [] };
+        let pmtSelection = null;
+        let pmtRequestInFlight = false;
+        let sdtRequestInFlight = false;
+        const serial = {
+            port: null,
+            reader: null,
+            writer: null,
+            pending: new Map(),
+            requestId: 1,
+            receive: new Uint8Array(),
+            fpga: {},
+            stream: {
+                sourcePacketsPerSecond: 0,
+                sourceBytesPerSecond: 0,
+                totalFrames: 0,
+                lastStatisticsAt: 0,
+                lastSyncCount: 0,
+                lastDataByteCount: 0,
+                lastFrameAt: 0,
+            },
+        };
+
+        function serialFrame(type, payload) {
+            const frame = new Uint8Array(5 + payload.length);
+            frame.set([0x53, 0x53, type, payload.length & 0xff, payload.length >> 8]);
+            frame.set(payload, 5);
+            return frame;
+        }
+
+        function serialHex(bytes) {
+            return [...bytes].map(value => value.toString(16).padStart(2, "0")).join("");
+        }
+
+        function logSerialFrame(direction, type, payload) {
+            const text = type === 0x80 || type === 0x02 || type === 0x03
+                ? new TextDecoder().decode(payload)
+                : null;
+            console.log(`WebSerial ${direction} frame`, {
+                type: `0x${type.toString(16).padStart(2, "0")}`,
+                length: payload.length,
+                text,
+                hex: serialHex(payload),
+            });
+        }
+
+        function updateFpgaStreamMetrics() {
+            if (!serial.port) return;
+
+            const stream = serial.stream;
+            const label = elements.connection.querySelector("span");
+            label.textContent = `FPGA ${stream.sourcePacketsPerSecond.toFixed(0)} TS/s | ${(stream.sourceBytesPerSecond / 1024).toFixed(1)} KiB/s | CDC ${stream.totalFrames} frames`;
+        }
+
+        function applyFpgaFrame(frame) {
+            if (frame.length < 2 || frame[1] !== frame.length - 2) return;
+            const stream = serial.stream;
+            stream.totalFrames++;
+            stream.lastFrameAt = performance.now();
+            const payload = frame.slice(2);
+            if (frame[0] === 0 && payload.length === 14) {
+                const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+                const statistics = { sync_count: view.getUint32(0, true), data_bytes_received: view.getUint32(4, true), sync_byte_errors: view.getUint32(8, true), filtered_drops: view.getUint16(12, true) };
+                if (stream.lastStatisticsAt) {
+                    const seconds = (stream.lastFrameAt - stream.lastStatisticsAt) / 1000;
+                    if (seconds > 0) {
+                        const packetRate = ((statistics.sync_count - stream.lastSyncCount) >>> 0) / seconds;
+                        const byteRate = ((statistics.data_bytes_received - stream.lastDataByteCount) >>> 0) / seconds;
+                        stream.sourcePacketsPerSecond = packetRate;
+                        stream.sourceBytesPerSecond = byteRate;
+                    }
+                }
+                stream.lastStatisticsAt = stream.lastFrameAt;
+                stream.lastSyncCount = statistics.sync_count;
+                stream.lastDataByteCount = statistics.data_bytes_received;
+                serial.fpga.statistics = statistics;
+            } else if (frame[0] === 1 && payload.length >= 1 && (payload.length - 1) % 2 === 0) {
+                const pids = [];
+                for (let index = 1; index < payload.length; index += 2) pids.push((payload[index] << 8) | payload[index + 1]);
+                serial.fpga.pidReport = { overflow: payload[0] !== 0, pids };
+            } else if (frame[0] === 2 && payload.length === 188) {
+                serial.fpga.patHex = serialHex(payload);
+            }
+        }
+
+        function processSerialBytes(bytes) {
+            const combined = new Uint8Array(serial.receive.length + bytes.length);
+            combined.set(serial.receive);
+            combined.set(bytes, serial.receive.length);
+            let offset = 0;
+            while (offset + 5 <= combined.length) {
+                if (combined[offset] !== 0x53 || combined[offset + 1] !== 0x53) {
+                    console.warn("WebSerial RX discarded byte", `0x${combined[offset].toString(16).padStart(2, "0")}`);
+                    offset++;
+                    continue;
+                }
+                const length = combined[offset + 3] | combined[offset + 4] << 8;
+                if (offset + 5 + length > combined.length) break;
+                const type = combined[offset + 2];
+                const payload = combined.slice(offset + 5, offset + 5 + length);
+                logSerialFrame("RX", type, payload);
+                if (type === 1) {
+                    applyFpgaFrame(payload);
+                } else if (type === 2 || type === 3) {
+                    try {
+                        const response = JSON.parse(new TextDecoder().decode(payload));
+                        const pending = serial.pending.get(response.id);
+                        if (pending) {
+                            serial.pending.delete(response.id);
+                            response.ok ? pending.resolve(response.data) : pending.reject(new Error(response.error || "serial_request_failed"));
+                        }
+                    } catch { }
+                }
+                offset += 5 + length;
+            }
+            serial.receive = combined.slice(offset);
+        }
+
+        async function serialReadLoop() {
+            try {
+                while (serial.reader) {
+                    const { value, done } = await serial.reader.read();
+                    if (done) break;
+                    if (value) processSerialBytes(value);
+                }
+            } catch (error) {
+                for (const pending of serial.pending.values()) pending.reject(error);
+                serial.pending.clear();
+            } finally {
+                serial.reader?.releaseLock();
+                serial.reader = null;
+                serial.writer?.releaseLock();
+                serial.writer = null;
+                serial.port = null;
+                elements.connection.classList.remove("online");
+                elements.connection.querySelector("span").textContent = "API OFFLINE";
+                elements.serial.textContent = "Open via serial";
+                elements.serial.disabled = false;
+            }
+        }
+
+        async function serialRequest(path, options) {
+            if (!serial.writer) throw new Error("serial_not_connected");
+            const id = serial.requestId++;
+            const command = new TextEncoder().encode(JSON.stringify({ id, path, method: options.method || "GET", body: options.body ? JSON.parse(options.body) : null }));
+            const response = new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => { serial.pending.delete(id); reject(new Error("serial_timeout")); }, options.timeoutMs || 2000);
+                serial.pending.set(id, { resolve: data => { clearTimeout(timeout); resolve(data); }, reject: error => { clearTimeout(timeout); reject(error); } });
+            });
+            logSerialFrame("TX", 0x80, command);
+            await serial.writer.write(serialFrame(0x80, command));
+            return response;
+        }
+
+        async function openSerial() {
+            if (!navigator.serial) throw new Error("WebSerial is unavailable in this browser.");
+            elements.serial.disabled = true;
+            serial.port = await navigator.serial.requestPort();
+            await serial.port.open({ baudRate: 115200 });
+            serial.writer = serial.port.writable.getWriter();
+            serial.reader = serial.port.readable.getReader();
+            void serialReadLoop();
+            await serialRequest("/stream", { method: "POST", body: JSON.stringify({ enabled: true }), timeoutMs: 5000 });
+            elements.connection.classList.add("online");
+            updateFpgaStreamMetrics();
+            elements.serial.textContent = "Serial connected";
+            await refreshStatus();
+            await refreshFilterStatus();
+        }
+
+        setInterval(updateFpgaStreamMetrics, 250);
+
+        try {
+            const storedGroups = JSON.parse(localStorage.getItem(serviceMapStorageKey) ?? "[]");
+            storedGroups.forEach(([transportStreamId, services]) => {
+                if (Number.isInteger(transportStreamId) && Array.isArray(services)) {
+                    servicesByTransportStream.set(transportStreamId, services);
+                }
+            });
+        } catch {
+            localStorage.removeItem(serviceMapStorageKey);
+        }
 
         const legacyValues = {
             delivery: { 5: "DVB-S", 6: "DVB-S2" },
@@ -732,7 +1227,9 @@
             const map = (group, value, fallback) => typeof value === "number" ? legacyValues[group][value] ?? fallback : value ?? fallback;
             const polarization = pick("polarization", "pol", "V");
             return {
-                name: channel.name || channel.title || `Channel ${index + 1}`,
+                name: channel.name || channel.title || (Number.isInteger(channel.transponder)
+                    ? `TP ${channel.transponder} | ${channel.frequency_mhz} ${polarization}`
+                    : `Channel ${index + 1}`),
                 frequency_mhz: Number(pick("frequency_mhz", "freq_mhz", 0)),
                 symbol_rate_ksps: Number(pick("symbol_rate_ksps", "sr_ksps", 0)),
                 polarization: typeof polarization === "number" ? (polarization === 1 ? "H" : "V") : polarization,
@@ -756,11 +1253,25 @@
             elements.tune.focus();
         }
 
+        async function fetchChannelSource() {
+            const candidates = ["./chan.jsn"];
+            if (serverBase) candidates.push(`${serverBase}/chan.jsn`);
+            let lastError = new Error("no_source");
+            for (const url of candidates) {
+                try {
+                    const response = await fetch(url, { cache: "no-store" });
+                    if (!response.ok) throw new Error(`http_${response.status}`);
+                    return await response.json();
+                } catch (error) {
+                    lastError = error;
+                }
+            }
+            throw lastError;
+        }
+
         async function loadChannels() {
             try {
-                const response = await fetch("/chan.jsn", { cache: "no-store" });
-                if (!response.ok) throw new Error(`http_${response.status}`);
-                const source = await response.json();
+                const source = await fetchChannelSource();
                 const channels = (Array.isArray(source) ? source : source.channels || []).map(normalizeChannel);
                 elements.channels.replaceChildren();
                 channels.forEach(channel => {
@@ -788,13 +1299,23 @@
         }
 
         async function api(path = "", options = {}) {
+            if (serial.port) {
+                const response = await serialRequest(path, options);
+                if (path === "") {
+                    response.fpga_statistics = serial.fpga.statistics ?? response.fpga_statistics;
+                    response.fpga_pid_report = serial.fpga.pidReport ?? response.fpga_pid_report;
+                    if (serial.fpga.patHex) response.fpga_pat = { length: 188, hex: serial.fpga.patHex };
+                }
+                return response;
+            }
+            const { timeoutMs = 2000, ...fetchOptions } = options;
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 2000);
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
             try {
-                const response = await fetch(API + path, {
-                    ...options,
+                const response = await fetch(serverBase + API_PATH + path, {
+                    ...fetchOptions,
                     signal: controller.signal,
-                    headers: options.body ? { "Content-Type": "application/json" } : undefined
+                    headers: fetchOptions.body ? { "Content-Type": "application/json" } : undefined
                 });
                 const body = await response.json();
                 if (!response.ok) throw new Error(body.error || `http_${response.status}`);
@@ -931,6 +1452,345 @@
             };
         }
 
+        function decodePmtSection(bytes, transportPid) {
+            if (bytes[0] !== 0x02) throw new Error("Section is not a PMT.");
+            const sectionLength = ((bytes[1] & 0x0f) << 8) | bytes[2];
+            const sectionEnd = 3 + sectionLength;
+            if (sectionEnd !== bytes.length || sectionLength < 13) throw new Error("PMT section length is invalid.");
+            if (crc32Mpeg(bytes) !== 0) throw new Error("PMT CRC-32/MPEG-2 is invalid.");
+            const entriesEnd = sectionEnd - 4;
+            const programInfoLength = ((bytes[10] & 0x0f) << 8) | bytes[11];
+            const streams = [];
+            let index = 12 + programInfoLength;
+            while (index < entriesEnd) {
+                if (index + 5 > entriesEnd) throw new Error("PMT elementary stream entry is incomplete.");
+                const infoLength = ((bytes[index + 3] & 0x0f) << 8) | bytes[index + 4];
+                if (index + 5 + infoLength > entriesEnd) throw new Error("PMT descriptor loop is incomplete.");
+                streams.push({
+                    streamType: bytes[index],
+                    pid: ((bytes[index + 1] & 0x1f) << 8) | bytes[index + 2],
+                    infoLength
+                });
+                index += 5 + infoLength;
+            }
+
+            const transmittedCrc = ((bytes[entriesEnd] << 24) | (bytes[entriesEnd + 1] << 16) |
+                (bytes[entriesEnd + 2] << 8) | bytes[entriesEnd + 3]) >>> 0;
+            return {
+                transportPid,
+                programNumber: (bytes[3] << 8) | bytes[4],
+                version: (bytes[5] >> 1) & 0x1f,
+                current: Boolean(bytes[5] & 0x01),
+                sectionNumber: bytes[6],
+                lastSectionNumber: bytes[7],
+                pcrPid: ((bytes[8] & 0x1f) << 8) | bytes[9],
+                sectionLength,
+                transmittedCrc,
+                crcValid: crc32Mpeg(bytes) === 0,
+                streams
+            };
+        }
+
+        function decodeDvbText(bytes) {
+            if (!bytes.length) return "";
+            let start = 0;
+            if (bytes[0] < 0x20) start = 1;
+            return String.fromCharCode(...bytes.slice(start)).replace(/[\x00-\x1f\x7f]/g, "").trim();
+        }
+
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, character => ({
+                "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+            })[character]);
+        }
+
+        function serviceTypeName(type) {
+            const names = {
+                0x01: "Digital TV", 0x02: "Digital radio", 0x0c: "Data broadcast",
+                0x16: "HD TV", 0x19: "Advanced codec SD", 0x1f: "Advanced codec HD"
+            };
+            return names[type] ?? `Type ${hexValue(type, 2)}`;
+        }
+
+        function controlPidDescription(pid) {
+            const descriptions = {
+                0x0000: "PAT – Program Association Table",
+                0x0001: "CAT – Conditional Access Table",
+                0x0002: "TSDT – Transport Stream Description Table",
+                0x0010: "NIT – Network Information Table",
+                0x0011: "SDT / BAT – Service Description Table / Bouquet Association Table",
+                0x0012: "EIT – Event Information Table / EPG",
+                0x0013: "RST – Running Status Table",
+                0x0014: "TDT / TOT – Time & Date / Time Offset Table",
+                0x0015: "Network Synchronization",
+                0x0016: "RNT – Resolution Notification Table",
+                0x001c: "In-band signalling",
+                0x001d: "Measurement",
+                0x001e: "DIT – Discontinuity Information Table",
+                0x001f: "SIT – Selection Information Table"
+            };
+            if (pid >= 0x0003 && pid <= 0x000f) return "ISO/IEC 13818-1 reserved";
+            if (pid >= 0x0017 && pid <= 0x001b) return "DVB reserved";
+            return descriptions[pid] ?? "Reserved";
+        }
+
+        function renderControlPidReference(buffers) {
+            const bufferByPid = new Map((Array.isArray(buffers) ? buffers : [])
+                .map(buffer => [buffer.pid, buffer]));
+            const pids = [...pidsForCurrentTransportStream]
+                .filter(pid => pid >= 0 && pid <= 0x001f)
+                .sort((first, second) => first - second);
+            elements.controlPidStatus.className = "service-status";
+            elements.controlPidStatus.textContent = pidTransportStreamId === null
+                ? "Waiting for a PAT and PID report."
+                : `${pids.length} observed control PIDs on transport stream ${hexValue(pidTransportStreamId)}.`;
+            if (!pids.length) {
+                elements.controlPidTable.replaceChildren();
+                elements.controlPidDetails.replaceChildren();
+                return;
+            }
+            const rows = pids.map(pid => {
+                const buffer = bufferByPid.get(pid);
+                const retained = buffer ? `${buffer.retained_packets} / ${buffer.packets_received}` : "0 / 0";
+                const continuity = buffer ? buffer.continuity_errors : 0;
+                const inspect = pid === 0x0010 || pid === 0x0011
+                    ? `<button type="button" data-control-pid="${pid}">Inspect</button>` : "";
+                return `<tr><td>${hexValue(pid)}</td><td>${controlPidDescription(pid)}</td><td>${retained}</td><td>${continuity}</td><td>${inspect}</td></tr>`;
+            }).join("");
+            elements.controlPidTable.innerHTML = `<table class="service-table"><thead><tr><th>PID</th><th>Meaning</th><th>Retained / received</th><th>CC errors</th><th>Payload</th></tr></thead><tbody>${rows}</tbody></table>`;
+            elements.controlPidTable.querySelectorAll("[data-control-pid]").forEach(button => {
+                button.addEventListener("click", () => inspectControlPid(Number(button.dataset.controlPid)));
+            });
+        }
+
+        function appendPsiBytes(state, source) {
+            for (const value of source) {
+                if (!state.section.length && value === 0xff) continue;
+                state.section.push(value);
+                if (state.expectedLength === null && state.section.length === 3) {
+                    state.expectedLength = 3 + ((state.section[1] & 0x0f) << 8) + state.section[2];
+                }
+                if (state.expectedLength !== null && state.section.length === state.expectedLength) {
+                    state.sections.push(Uint8Array.from(state.section));
+                    state.section = [];
+                    state.expectedLength = null;
+                }
+            }
+        }
+
+        function base64ToPacket(encodedPacket) {
+            try {
+                const decoded = atob(encodedPacket);
+                if (decoded.length !== 188) return null;
+                return Uint8Array.from(decoded, value => value.charCodeAt(0));
+            } catch {
+                return null;
+            }
+        }
+
+        function extractPsiSections(packetEncodings, pid) {
+            const state = { section: [], expectedLength: null, sections: [] };
+            for (const encoding of packetEncodings) {
+                const packet = base64ToPacket(encoding);
+                if (!packet) continue;
+                if (packet.length !== 188 || packet[0] !== 0x47 || ((packet[1] & 0x1f) << 8 | packet[2]) !== pid) continue;
+                const adaptationControl = (packet[3] >> 4) & 0x03;
+                if (!(adaptationControl & 0x01)) continue;
+                let offset = 4;
+                if (adaptationControl & 0x02) offset += 1 + packet[offset];
+                if (offset >= packet.length) continue;
+                if (packet[1] & 0x40) {
+                    const pointer = packet[offset++];
+                    if (state.section.length) appendPsiBytes(state, packet.slice(offset, offset + pointer));
+                    state.section = [];
+                    state.expectedLength = null;
+                    offset += pointer;
+                }
+                appendPsiBytes(state, packet.slice(offset));
+            }
+            return state.sections;
+        }
+
+        function decodeNit(section) {
+            if (section[0] !== 0x40 && section[0] !== 0x41) throw new Error("Section is not an NIT.");
+            const sectionLength = ((section[1] & 0x0f) << 8) | section[2];
+            if (sectionLength + 3 !== section.length || crc32Mpeg(section) !== 0) throw new Error("NIT section is incomplete or has an invalid CRC.");
+            const networkId = (section[3] << 8) | section[4];
+            const networkDescriptorLength = ((section[8] & 0x0f) << 8) | section[9];
+            let offset = 10;
+            const descriptorsEnd = offset + networkDescriptorLength;
+            let networkName = "";
+            while (offset + 2 <= descriptorsEnd) {
+                const length = section[offset + 1];
+                if (offset + 2 + length > descriptorsEnd) break;
+                if (section[offset] === 0x40) networkName = decodeDvbText(section.slice(offset + 2, offset + 2 + length));
+                offset += 2 + length;
+            }
+            const loopLength = ((section[descriptorsEnd] & 0x0f) << 8) | section[descriptorsEnd + 1];
+            const loopEnd = Math.min(descriptorsEnd + 2 + loopLength, section.length - 4);
+            offset = descriptorsEnd + 2;
+            const streams = [];
+            while (offset + 6 <= loopEnd) {
+                const transportStreamId = (section[offset] << 8) | section[offset + 1];
+                const originalNetworkId = (section[offset + 2] << 8) | section[offset + 3];
+                const length = ((section[offset + 4] & 0x0f) << 8) | section[offset + 5];
+                streams.push({ transportStreamId, originalNetworkId, descriptorBytes: length });
+                offset += 6 + length;
+            }
+            return { table: section[0] === 0x40 ? "Actual NIT" : "Other NIT", networkId, networkName, streams };
+        }
+
+        async function inspectControlPid(pid) {
+            elements.controlPidDetails.textContent = `Loading ${hexValue(pid)} payload...`;
+            try {
+                const payload = await api(`/retained-pid?pid=${pid}`, { timeoutMs: 5000 });
+                const sections = extractPsiSections(payload.packets, pid);
+                const supportedSections = pid === 0x0010
+                    ? sections.filter(section => section[0] === 0x40 || section[0] === 0x41)
+                    : sections.filter(section => section[0] === 0x42 || section[0] === 0x46);
+                const otherTableIds = [...new Set(sections
+                    .filter(section => !supportedSections.includes(section))
+                    .map(section => hexValue(section[0], 2)))];
+                const decoded = supportedSections.map(section => pid === 0x0010
+                    ? decodeNit(section)
+                    : decodeSdt([...section].map(value => value.toString(16).padStart(2, "0")).join("")));
+                const representation = decoded.map((entry, index) => {
+                    if (pid === 0x0010) return `NIT section ${index + 1}: ${entry.table}, network ${hexValue(entry.networkId)}${entry.networkName ? ` (${entry.networkName})` : ""}, ${entry.streams.length} transport streams\n${entry.streams.map(stream => `  ${hexValue(stream.transportStreamId)} / ONID ${hexValue(stream.originalNetworkId)} / ${stream.descriptorBytes} descriptor bytes`).join("\n")}`;
+                    return `SDT section ${index + 1}: transport stream ${hexValue(entry.transportStreamId)}, ${entry.services.length} services\n${entry.services.map(service => `  ${hexValue(service.serviceId)} ${service.name} (${service.provider || "unknown provider"})`).join("\n")}`;
+                }).join("\n\n") || "No complete supported PSI sections found in the retained packets.";
+                const otherTables = otherTableIds.length
+                    ? `\n\nOther table IDs observed on this PID: ${otherTableIds.join(", ")}.`
+                    : "";
+                const raw = payload.packets.join("\n");
+                elements.controlPidDetails.innerHTML = `<h3 class="service-stream-title">Decoded representation</h3><pre>${escapeHtml(representation + otherTables)}</pre><h3 class="service-stream-title">Base64 TS payload (${payload.packets.length} packets)</h3><pre>${escapeHtml(raw)}</pre>`;
+            } catch (error) {
+                elements.controlPidDetails.innerHTML = `<p class="service-status error">${escapeHtml(error.message)}</p>`;
+            }
+        }
+
+        function runningStatusName(status) {
+            return ["Undefined", "Not running", "Starts soon", "Pausing", "Running", "Off-air" ][status] ?? "Reserved";
+        }
+
+        function decodeSdt(hex) {
+            const normalized = typeof hex === "string" ? hex.replace(/\s/g, "").toUpperCase() : "";
+            if (!/^[0-9A-F]{8,}$/.test(normalized) || normalized.length % 2) throw new Error("Waiting for a complete SDT section.");
+            const bytes = Uint8Array.from(normalized.match(/.{2}/g), value => parseInt(value, 16));
+            if (bytes[0] !== 0x42 && bytes[0] !== 0x46) throw new Error("Section is not an SDT.");
+            const sectionLength = ((bytes[1] & 0x0f) << 8) | bytes[2];
+            const sectionEnd = 3 + sectionLength;
+            if (sectionLength < 12 || sectionEnd !== bytes.length) throw new Error("SDT section length is invalid.");
+            if (crc32Mpeg(bytes) !== 0) throw new Error("SDT CRC-32/MPEG-2 is invalid.");
+            const servicesEnd = sectionEnd - 4;
+            const services = [];
+            let index = 11;
+            while (index < servicesEnd) {
+                if (index + 5 > servicesEnd) throw new Error("SDT service loop is incomplete.");
+                const serviceId = (bytes[index] << 8) | bytes[index + 1];
+                const runningStatus = bytes[index + 3] >> 5;
+                const freeCa = Boolean(bytes[index + 3] & 0x10);
+                const descriptorsLength = ((bytes[index + 3] & 0x0f) << 8) | bytes[index + 4];
+                const descriptorsEnd = index + 5 + descriptorsLength;
+                if (descriptorsEnd > servicesEnd) throw new Error("SDT descriptor loop is incomplete.");
+                let name = "Unnamed";
+                let provider = "";
+                let type = null;
+                let descriptor = index + 5;
+                while (descriptor < descriptorsEnd) {
+                    if (descriptor + 2 > descriptorsEnd) throw new Error("SDT descriptor is incomplete.");
+                    const tag = bytes[descriptor];
+                    const length = bytes[descriptor + 1];
+                    const descriptorEnd = descriptor + 2 + length;
+                    if (descriptorEnd > descriptorsEnd) throw new Error("SDT descriptor exceeds its service loop.");
+                    if (tag === 0x48 && length >= 3) {
+                        type = bytes[descriptor + 2];
+                        const providerLength = bytes[descriptor + 3];
+                        const nameLengthOffset = descriptor + 4 + providerLength;
+                        if (nameLengthOffset < descriptorEnd) {
+                            provider = decodeDvbText(bytes.slice(descriptor + 4, nameLengthOffset));
+                            const nameLength = bytes[nameLengthOffset];
+                            if (nameLengthOffset + 1 + nameLength <= descriptorEnd) {
+                                name = decodeDvbText(bytes.slice(nameLengthOffset + 1, nameLengthOffset + 1 + nameLength)) || name;
+                            }
+                        }
+                    }
+                    descriptor = descriptorEnd;
+                }
+                services.push({ serviceId, name, provider, type, runningStatus, freeCa });
+                index = descriptorsEnd;
+            }
+            return { transportStreamId: (bytes[3] << 8) | bytes[4], services };
+        }
+
+        function renderStoredServices() {
+            const streamGroups = [...servicesByTransportStream.entries()]
+                .sort(([first], [second]) => {
+                    if (first === currentPatTransportStreamId) return -1;
+                    if (second === currentPatTransportStreamId) return 1;
+                    return first - second;
+                })
+                .map(([transportStreamId, services]) => {
+                    const rows = services.map(service => `<tr><td>${hexValue(service.serviceId)}</td><td>${escapeHtml(service.name)}</td><td>${escapeHtml(service.provider || "-")}</td><td>${service.type === null ? "Unknown" : serviceTypeName(service.type)}</td><td>${runningStatusName(service.runningStatus)}</td><td>${service.freeCa ? "CA" : "Free"}</td></tr>`).join("");
+                    const current = transportStreamId === currentPatTransportStreamId;
+                    return `<div class="service-stream-group${current ? " current" : ""}"><h3 class="service-stream-title">Transport stream ${hexValue(transportStreamId)}${current ? " · CURRENT" : ""} · ${services.length} services</h3><div class="service-table-wrap"><table class="service-table"><thead><tr><th>Service</th><th>Name</th><th>Provider</th><th>Type</th><th>Status</th><th>Access</th></tr></thead><tbody>${rows || "<tr><td colspan=\"6\">No services declared</td></tr>"}</tbody></table></div></div>`;
+                }).join("");
+            const serviceCount = [...servicesByTransportStream.values()]
+                .reduce((total, services) => total + services.length, 0);
+            elements.serviceStatus.className = "service-status";
+            elements.serviceStatus.textContent = `${serviceCount} services across ${servicesByTransportStream.size} transport streams.`;
+            elements.serviceTable.innerHTML = streamGroups;
+        }
+
+        function renderFoundServices(hex) {
+            if (decodedSdtSections.has(hex)) return;
+            try {
+                const decoded = decodeSdt(hex);
+                decodedSdtSections.add(hex);
+                servicesByTransportStream.set(decoded.transportStreamId, decoded.services);
+                localStorage.setItem(serviceMapStorageKey,
+                                     JSON.stringify([...servicesByTransportStream.entries()]));
+                renderStoredServices();
+            } catch (error) {
+                elements.serviceStatus.className = "service-status error";
+                elements.serviceStatus.textContent = error.message;
+                elements.serviceTable.replaceChildren();
+            }
+        }
+
+        async function updateFoundServices(buffers) {
+            if (sdtRequestInFlight || !buffers?.some(buffer => buffer.pid === 0x0011)) {
+                if (!servicesByTransportStream.size) {
+                    elements.serviceStatus.className = "service-status";
+                    elements.serviceStatus.textContent = "Waiting for filtered SDT packets on PID 0x0011.";
+                }
+                return;
+            }
+            sdtRequestInFlight = true;
+            try {
+                const payload = await api("/retained-pid?pid=17", { timeoutMs: 5000 });
+                const sections = extractPsiSections(payload.packets, 0x0011)
+                    .filter(section => section[0] === 0x42 || section[0] === 0x46);
+                sections.forEach(section => renderFoundServices(
+                    [...section].map(value => value.toString(16).padStart(2, "0")).join("")));
+                if (servicesByTransportStream.size) renderStoredServices();
+            } catch (error) {
+                elements.serviceStatus.className = "service-status error";
+                elements.serviceStatus.textContent = error.message;
+            } finally {
+                sdtRequestInFlight = false;
+            }
+        }
+
+        function streamTypeName(streamType) {
+            const names = {
+                0x01: "MPEG-1 video", 0x02: "MPEG-2 video", 0x03: "MPEG-1 audio",
+                0x04: "MPEG-2 audio", 0x06: "Private PES", 0x0f: "AAC audio",
+                0x11: "AAC LATM", 0x1b: "H.264 video", 0x24: "H.265 video",
+                0x81: "AC-3 audio"
+            };
+            return names[streamType] ?? "Unknown";
+        }
+
         function hexValue(value, width = 4) {
             return `0x${value.toString(16).padStart(width, "0").toUpperCase()}`;
         }
@@ -941,7 +1801,9 @@
                 const fields = (items) => items.map(([label, value, state = ""]) =>
                     `<div class="decoder-field"><span>${label}</span><strong class="${state}">${value}</strong></div>`).join("");
                 const programRows = decoded.programs.length
-                    ? decoded.programs.map(program => `<tr><td>${program.type}</td><td>${program.programNumber}</td><td>${hexValue(program.pid)}</td></tr>`).join("")
+                    ? decoded.programs.map(program => program.programNumber === 0
+                        ? `<tr><td>${program.type}</td><td>${hexValue(program.programNumber)}</td><td>${hexValue(program.pid)}</td></tr>`
+                        : `<tr class="decoder-program-row" tabindex="0" role="button" data-program-number="${program.programNumber}" data-pmt-pid="${program.pid}" aria-label="Select program ${hexValue(program.programNumber)}, PMT PID ${hexValue(program.pid)}"><td>${program.type}</td><td>${hexValue(program.programNumber)}</td><td>${hexValue(program.pid)} &gt;</td></tr>`).join("")
                     : `<tr><td colspan="3">No program mappings</td></tr>`;
                 elements.patDecoderBody.className = "";
                 elements.patDecoderBody.innerHTML = `
@@ -974,10 +1836,119 @@
                             <thead><tr><th>Type</th><th>Program</th><th>PID</th></tr></thead>
                             <tbody>${programRows}</tbody>
                         </table></div>
-                    </div>`;
+                        <p class="decoder-note">Select a program row to capture and decode only its PMT.</p>
+                    </div>
+                    ${renderPmtDecoder(fields)}`;
             } catch (error) {
                 elements.patDecoderBody.className = "decoder-empty";
                 elements.patDecoderBody.textContent = error.message;
+            }
+        }
+
+        function renderPmtDecoder(fields) {
+            if (!pmtSelection) return "";
+            if (!pmtSelection.pmt) {
+                const state = pmtSelection.error ? "error" : "";
+                return `<div class="decoder-section"><h3>Selected PMT</h3><p class="decoder-status ${state}">${pmtSelection.error ?? `Waiting for program ${hexValue(pmtSelection.programNumber)} on PID ${hexValue(pmtSelection.pmtPid)}...`}</p></div>`;
+            }
+
+            const pmt = pmtSelection.pmt;
+            const streamRows = pmt.streams.length
+                ? pmt.streams.map(stream => `<tr><td><input class="decoder-stream-toggle" type="checkbox" data-stream-pid="${stream.pid}" aria-label="Toggle PID ${hexValue(stream.pid)}" ${pmtSelection.selectedPids.has(stream.pid) ? "checked" : ""} ${pmtSelection.applying ? "disabled" : ""}></td><td>${hexValue(stream.streamType, 2)}</td><td>${streamTypeName(stream.streamType)}</td><td>${hexValue(stream.pid)}</td></tr>`).join("")
+                : `<tr><td colspan="4">No elementary streams</td></tr>`;
+            return `<div class="decoder-section">
+                <h3>Program map table</h3>
+                <div class="decoder-grid">${fields([
+                    ["Program", hexValue(pmt.programNumber)],
+                    ["PMT PID", hexValue(pmt.transportPid)],
+                    ["PCR PID", hexValue(pmt.pcrPid)],
+                    ["Version", pmt.version],
+                    ["Section", `${pmt.sectionNumber} / ${pmt.lastSectionNumber}`],
+                    ["CRC status", pmt.crcValid ? "VALID" : "INVALID", pmt.crcValid ? "decoder-good" : "decoder-bad"]
+                ])}</div>
+                <div class="decoder-table-wrap"><table class="decoder-table">
+                    <thead><tr><th>On</th><th>Type</th><th>Codec</th><th>PID</th></tr></thead>
+                    <tbody>${streamRows}</tbody>
+                </table></div>
+                <p class="decoder-note">PAT and PMT are retained after selecting a stream. Two elementary PIDs can be active with the four hardware filters.</p>
+                ${pmtSelection.error ? `<p class="decoder-status error">${pmtSelection.error}</p>` : ""}
+            </div>`;
+        }
+
+        function exactPidFilter(pid) {
+            return { enabled: true, pid, mask: 0x1fff };
+        }
+
+        function paddedFilters(filters) {
+            return Array.from({ length: 4 }, (_, index) => filters[index] ?? { enabled: false, pid: 0, mask: 0x1fff });
+        }
+
+        async function applyDecoderFilters(filters) {
+            await api("/filters", { method: "POST", body: JSON.stringify({ filters: paddedFilters(filters) }) });
+            filterControlsLoaded = false;
+            await refreshFilterStatus();
+        }
+
+        async function selectProgram(programNumber, pmtPid) {
+            pmtSelection = { programNumber, pmtPid, pmt: null, selectedPids: new Set(), applying: true, error: null };
+            renderPatDecoder();
+            try {
+                await applyDecoderFilters([exactPidFilter(pmtPid)]);
+                pmtSelection.applying = false;
+            } catch (error) {
+                pmtSelection.applying = false;
+                pmtSelection.error = `Unable to select PMT: ${error.message}`;
+            }
+            renderPatDecoder();
+        }
+
+        async function togglePmtStream(pid, enabled) {
+            if (!pmtSelection?.pmt || pmtSelection.applying) return;
+            const previous = new Set(pmtSelection.selectedPids);
+            if (enabled && pmtSelection.selectedPids.size >= 2) {
+                pmtSelection.error = "Only two elementary PIDs fit alongside PAT and PMT.";
+                renderPatDecoder();
+                return;
+            }
+            if (enabled) pmtSelection.selectedPids.add(pid);
+            else pmtSelection.selectedPids.delete(pid);
+            pmtSelection.applying = true;
+            pmtSelection.error = null;
+            renderPatDecoder();
+            try {
+                const selected = [...pmtSelection.selectedPids].map(exactPidFilter);
+                const filters = selected.length
+                    ? [exactPidFilter(0), exactPidFilter(pmtSelection.pmtPid), ...selected]
+                    : [exactPidFilter(pmtSelection.pmtPid)];
+                await applyDecoderFilters(filters);
+            } catch (error) {
+                pmtSelection.selectedPids = previous;
+                pmtSelection.error = `Unable to apply stream filters: ${error.message}`;
+            } finally {
+                pmtSelection.applying = false;
+                renderPatDecoder();
+            }
+        }
+
+        async function updatePmtSelection(buffers) {
+            if (!pmtSelection || pmtSelection.pmt || pmtRequestInFlight ||
+                !buffers?.some(buffer => buffer.pid === pmtSelection.pmtPid)) return;
+            pmtRequestInFlight = true;
+            try {
+                const payload = await api(`/retained-pid?pid=${pmtSelection.pmtPid}`, { timeoutMs: 5000 });
+                const section = extractPsiSections(payload.packets, pmtSelection.pmtPid)
+                    .find(item => item[0] === 0x02);
+                if (!section) return;
+                const decoded = decodePmtSection(section, pmtSelection.pmtPid);
+                if (decoded.transportPid !== pmtSelection.pmtPid || decoded.programNumber !== pmtSelection.programNumber) return;
+                pmtSelection.pmt = decoded;
+                pmtSelection.error = null;
+                if (document.body.classList.contains("decoder-open")) renderPatDecoder();
+            } catch (error) {
+                pmtSelection.error = error.message;
+                if (document.body.classList.contains("decoder-open")) renderPatDecoder();
+            } finally {
+                pmtRequestInFlight = false;
             }
         }
 
@@ -992,9 +1963,161 @@
             elements.patDecoderOpen.focus();
         }
 
+        function renderPidDrawer() {
+            const pids = [...pidsForCurrentTransportStream].sort((first, second) => first - second);
+            elements.pidDrawerSubtitle.textContent = pidTransportStreamId === null
+                ? "WAITING FOR PAT"
+                : `TRANSPORT STREAM ${hexValue(pidTransportStreamId)} · ${pids.length} PIDS`;
+            if (!pids.length) {
+                elements.pidDrawerBody.className = "decoder-empty";
+                elements.pidDrawerBody.textContent = "No PIDs have been reported for this transport stream.";
+                return;
+            }
+            const rows = pids.map(pid => `<tr><td>${hexValue(pid)}</td><td>${pid}</td></tr>`).join("");
+            elements.pidDrawerBody.className = "";
+            elements.pidDrawerBody.innerHTML = `<div class="decoder-section"><div class="decoder-table-wrap"><table class="decoder-table"><thead><tr><th>PID</th><th>Decimal</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+        }
+
+        function openPidDrawer() {
+            renderPidDrawer();
+            document.body.classList.add("pid-drawer-open");
+            elements.pidDrawerClose.focus();
+        }
+
+        function closePidDrawer() {
+            document.body.classList.remove("pid-drawer-open");
+            elements.pidDrawerOpen.focus();
+        }
+
+        function parseFilterHex(value) {
+            const normalized = value.trim().replace(/^0x/i, "");
+            if (!/^[0-9a-f]{1,4}$/i.test(normalized)) throw new Error("PID and mask must be hexadecimal");
+            const parsed = parseInt(normalized, 16);
+            if (parsed > 0x1fff) throw new Error("PID and mask must not exceed 0x1FFF");
+            return parsed;
+        }
+
+        function renderFilterStatus(status) {
+            const filters = Array.isArray(status.filters) ? status.filters : [];
+            if (!filterControlsLoaded) {
+                for (let index = 0; index < 4; index++) {
+                    const filter = filters[index] ?? { enabled: false, pid: 0, mask: 0x1fff };
+                    document.getElementById(`filterEnabled${index}`).checked = filter.enabled;
+                    document.getElementById(`filterPid${index}`).value = hexValue(filter.pid);
+                    document.getElementById(`filterMask${index}`).value = hexValue(filter.mask);
+                }
+                filterControlsLoaded = true;
+            }
+
+            if (!udpControlsLoaded) {
+                elements.udpEnabled.checked = Boolean(status.udp_enabled);
+                elements.udpRate.value = status.udp_max_rate_kib_s ?? 0;
+                udpControlsLoaded = true;
+            }
+
+            const udpMode = status.udp_enabled
+                ? (status.udp_max_rate_kib_s ? `ON ${status.udp_max_rate_kib_s} KiB/s` : "ON unlimited")
+                : "OFF";
+            elements.udpState.textContent = `:${status.udp_port} · ${udpMode} · ${status.udp_packets.toLocaleString()} packets · ${status.udp_datagrams.toLocaleString()} datagrams · ${(status.udp_throttle_drops ?? 0).toLocaleString()} throttled · ${status.queue_drops} queue drops · ${status.udp_send_errors} send errors`;
+            elements.filterStreams.replaceChildren();
+            filters.forEach((filter, index) => {
+                const row = document.createElement("div");
+                const head = document.createElement("div");
+                const title = document.createElement("strong");
+                const rate = document.createElement("span");
+                const packet = document.createElement("pre");
+                row.className = "filter-stream";
+                head.className = "filter-stream-head";
+                packet.className = "telemetry-dump";
+                title.textContent = `FILTER ${index + 1} · ${filter.enabled ? `${hexValue(filter.pid)} / ${hexValue(filter.mask)}` : "DISABLED"}`;
+                rate.textContent = `${filter.packets_per_second.toLocaleString()} pkt/s · ${filter.bytes_per_second.toLocaleString()} B/s · ${filter.packet_count.toLocaleString()} total`;
+                packet.textContent = formatPat(filter.latest_packet) ?? "No matching packet received";
+                head.append(title, rate);
+                row.append(head, packet);
+                elements.filterStreams.appendChild(row);
+            });
+        }
+
+        let filterStatusRequestInFlight = false;
+
+        async function refreshFilterStatus() {
+            if (filterStatusRequestInFlight || initializationInProgress) return;
+            filterStatusRequestInFlight = true;
+            try {
+                renderFilterStatus(await api("/filters"));
+            } catch (error) {
+                elements.udpState.textContent = "FILTER STATUS UNAVAILABLE";
+            } finally {
+                filterStatusRequestInFlight = false;
+            }
+        }
+
+        function recordHeapSample(heap) {
+            if (heap.free_internal === undefined) return;
+            heapHistory.internal.push(heap.free_internal);
+            heapHistory.spiram.push(heap.free_spiram ?? 0);
+            heapHistory.block.push(heap.largest_block_internal ?? 0);
+            for (const series of Object.values(heapHistory)) {
+                if (series.length > heapHistoryLimit) series.splice(0, series.length - heapHistoryLimit);
+            }
+            drawHeapPlot();
+        }
+
+        function drawHeapPlot() {
+            if (elements.heapPlotPanel.classList.contains("collapsed")) return;
+            const canvas = elements.heapPlot;
+            const context = canvas.getContext("2d");
+            const width = canvas.width;
+            const height = canvas.height;
+            const padding = 8;
+            context.clearRect(0, 0, width, height);
+
+            const samples = heapHistory.internal.length;
+            if (samples < 2) {
+                elements.heapPlotRange.textContent = "NO DATA";
+                return;
+            }
+
+            const all = [...heapHistory.internal, ...heapHistory.spiram, ...heapHistory.block];
+            const max = Math.max(...all);
+            const min = Math.min(...all);
+            const span = max - min || 1;
+            elements.heapPlotRange.textContent =
+                `${samples} SAMPLES · ${Math.round(min / 1024)}-${Math.round(max / 1024)} KIB`;
+
+            context.strokeStyle = "#252e29";
+            context.lineWidth = 1;
+            for (let step = 0; step <= 4; step++) {
+                const y = padding + (height - 2 * padding) * step / 4;
+                context.beginPath();
+                context.moveTo(padding, y);
+                context.lineTo(width - padding, y);
+                context.stroke();
+            }
+
+            const series = [
+                [heapHistory.internal, "#56d68b"],
+                [heapHistory.spiram, "#68b8c5"],
+                [heapHistory.block, "#e5b454"]
+            ];
+            context.lineWidth = 2;
+            for (const [values, color] of series) {
+                context.strokeStyle = color;
+                context.beginPath();
+                values.forEach((value, index) => {
+                    const x = padding + (width - 2 * padding) * index / (samples - 1);
+                    const y = height - padding - (height - 2 * padding) * (value - min) / span;
+                    if (index === 0) context.moveTo(x, y);
+                    else context.lineTo(x, y);
+                });
+                context.stroke();
+            }
+        }
+
         function renderStatus(status) {
             elements.connection.classList.add("online");
-            elements.connection.querySelector("span").textContent = "API ONLINE";
+            if (serial.port) updateFpgaStreamMetrics();
+            else elements.connection.querySelector("span").textContent = "API ONLINE";
             elements.hardware.classList.toggle("ready", status.initialized);
             elements.hardware.querySelector("span").textContent = status.initialized ? "Tuner initialized" : "Tuner not initialized";
             elements.reset.checked = status.reset;
@@ -1019,32 +2142,58 @@
             renderDiagnostic("firmwareRunning", status.firmware_running === null || status.firmware_running === undefined ? null : status.firmware_running ? "RUNNING" : "STOPPED");
             renderDiagnostic("firmwareVersion", status.firmware_version);
             renderDiagnostic("chipId", status.chip_id);
+            const heap = status.heap ?? {};
+            renderDiagnostic("heapInternal", heap.free_internal === undefined ? null
+                : `${Math.round(heap.free_internal / 1024)} KiB (min ${Math.round(heap.min_free_internal / 1024)} · block ${Math.round(heap.largest_block_internal / 1024)})`);
+            renderDiagnostic("heapSpiram", heap.free_spiram === undefined ? null
+                : `${Math.round(heap.free_spiram / 1024)} KiB (min ${Math.round(heap.min_free_spiram / 1024)} · block ${Math.round(heap.largest_block_spiram / 1024)})`);
+            renderDiagnostic("uptime", heap.uptime_s === undefined ? null
+                : `${Math.floor(heap.uptime_s / 3600)}h ${Math.floor(heap.uptime_s / 60) % 60}m ${heap.uptime_s % 60}s · stack ${heap.min_task_stack} B`);
+            recordHeapSample(heap);
             const fpgaStatistics = status.fpga_statistics ?? {};
             renderCounter("fpgaSync", fpgaStatistics.sync_count, fpgaStatistics.sync_count === 1 ? "sync" : "syncs");
             renderCounter("fpgaDataBytes", fpgaStatistics.data_bytes_received, "bytes");
             renderCounter("fpgaSyncErrors", fpgaStatistics.sync_byte_errors, fpgaStatistics.sync_byte_errors === 1 ? "error" : "errors");
-            const pidReport = status.fpga_pid_report ?? {};
-            const pidText = Array.isArray(pidReport.pids)
-                ? `${pidReport.pids.map(pid => pid.toString(16).padStart(4, "0").toUpperCase()).join(" · ") || "NONE"}${pidReport.overflow ? " · TRUNCATED" : ""}`
-                : null;
-            renderDiagnostic("fpgaPids", pidText);
+            renderCounter("fpgaFilteredDrops", fpgaStatistics.filtered_drops, fpgaStatistics.filtered_drops === 1 ? "drop" : "drops");
             latestPatHex = status.fpga_pat?.hex ?? null;
             renderDiagnostic("fpgaPat", formatPat(latestPatHex));
+            try {
+                currentPatTransportStreamId = decodePat(latestPatHex).section.transportStreamId;
+            } catch {
+                currentPatTransportStreamId = null;
+            }
+            if (currentPatTransportStreamId !== pidTransportStreamId) {
+                pidTransportStreamId = currentPatTransportStreamId;
+                pidsForCurrentTransportStream.clear();
+            }
+            const pidReport = status.fpga_pid_report ?? {};
+            if (pidTransportStreamId !== null && Array.isArray(pidReport.pids)) {
+                pidReport.pids.forEach(pid => pidsForCurrentTransportStream.add(pid));
+            }
+            renderDiagnostic("fpgaPids", pidTransportStreamId === null
+                ? null
+                : `${pidsForCurrentTransportStream.size} PIDs`);
+            if (document.body.classList.contains("pid-drawer-open")) renderPidDrawer();
+            renderControlPidReference(status.retained_pid_buffers);
+            updatePmtSelection(status.retained_pid_buffers);
+            updateFoundServices(status.retained_pid_buffers);
             if (document.body.classList.contains("decoder-open")) renderPatDecoder();
             elements.updated.textContent = new Date().toLocaleTimeString([], { hour12: false });
             elements.raw.textContent = JSON.stringify(status, null, 2);
         }
 
         let statusRequestInFlight = false;
+        let initializationInProgress = false;
 
         async function refreshStatus() {
-            if (statusRequestInFlight) return;
+            if (statusRequestInFlight || initializationInProgress) return;
             statusRequestInFlight = true;
             try {
                 renderStatus(await api());
             } catch (error) {
                 elements.connection.classList.remove("online");
-                elements.connection.querySelector("span").textContent = "API OFFLINE";
+                if (serial.port) updateFpgaStreamMetrics();
+                else elements.connection.querySelector("span").textContent = "API OFFLINE";
                 elements.updated.textContent = error.name === "AbortError" ? "TIMEOUT" : "ERROR";
             } finally {
                 statusRequestInFlight = false;
@@ -1053,14 +2202,18 @@
 
         elements.init.addEventListener("click", async () => {
             elements.init.disabled = true;
+            initializationInProgress = true;
             setCommand("Initializing...");
             try {
-                await api("/init", { method: "POST" });
+                await api("/init", { method: "POST", timeoutMs: 30000 });
                 setCommand("Initialization complete", "ok");
+                initializationInProgress = false;
                 await refreshStatus();
+                await refreshFilterStatus();
             } catch (error) {
-                setCommand(`Init failed: ${error.message}`, "error");
+                setCommand(error.name === "AbortError" ? "Initialization timed out after 30 seconds" : `Init failed: ${error.message}`, "error");
             } finally {
+                initializationInProgress = false;
                 elements.init.disabled = false;
             }
         });
@@ -1087,7 +2240,7 @@
             data.frequency_mhz = Number(data.frequency_mhz);
             data.symbol_rate_ksps = Number(data.symbol_rate_ksps);
             try {
-                await api("/tune", { method: "POST", body: JSON.stringify(data) });
+                await api("/tune", { method: "POST", body: JSON.stringify(data), timeoutMs: 15000 });
                 setCommand("Tune command accepted", "ok");
                 setTimeout(refreshStatus, 350);
             } catch (error) {
@@ -1097,20 +2250,151 @@
             }
         });
 
+        elements.filterForm.addEventListener("submit", async event => {
+            event.preventDefault();
+            const submit = elements.filterForm.querySelector("button[type=submit]");
+            submit.disabled = true;
+            elements.filterResult.textContent = "Applying...";
+            elements.filterResult.className = "";
+            try {
+                const filters = Array.from({ length: 4 }, (_, index) => ({
+                    enabled: document.getElementById(`filterEnabled${index}`).checked,
+                    pid: parseFilterHex(document.getElementById(`filterPid${index}`).value),
+                    mask: parseFilterHex(document.getElementById(`filterMask${index}`).value)
+                }));
+                await api("/filters", { method: "POST", body: JSON.stringify({ filters }) });
+                elements.filterResult.textContent = "Applied";
+                elements.filterResult.className = "ok";
+                filterControlsLoaded = false;
+                await refreshFilterStatus();
+            } catch (error) {
+                elements.filterResult.textContent = `Failed: ${error.message}`;
+                elements.filterResult.className = "error";
+            } finally {
+                submit.disabled = false;
+            }
+        });
+
+        elements.udpForm.addEventListener("submit", async event => {
+            event.preventDefault();
+            const submit = elements.udpForm.querySelector("button[type=submit]");
+            submit.disabled = true;
+            elements.udpResult.textContent = "Applying...";
+            elements.udpResult.className = "";
+            try {
+                await api("/udp", {
+                    method: "POST",
+                    body: JSON.stringify({
+                        enabled: elements.udpEnabled.checked,
+                        max_rate_kib_s: Math.max(0, Number(elements.udpRate.value) || 0)
+                    })
+                });
+                elements.udpResult.textContent = "Applied";
+                elements.udpResult.className = "ok";
+                udpControlsLoaded = false;
+                await refreshFilterStatus();
+            } catch (error) {
+                elements.udpResult.textContent = `Failed: ${error.message}`;
+                elements.udpResult.className = "error";
+            } finally {
+                submit.disabled = false;
+            }
+        });
+
         elements.refresh.addEventListener("click", refreshStatus);
+        elements.serial.addEventListener("click", () => {
+            openSerial().catch(error => setCommand(error.message, "error"));
+        });
+
+        function applyServerAddress() {
+            const normalized = normalizeServerAddress(elements.server.value);
+            const changed = normalized !== serverBase;
+            serverBase = normalized;
+            elements.server.value = normalized;
+            localStorage.setItem(serverAddressStorageKey, normalized);
+            if (changed) {
+                loadChannels();
+                refreshStatus();
+                refreshFilterStatus();
+            }
+        }
+
+        elements.server.value = serverBase;
+        elements.server.addEventListener("change", applyServerAddress);
+        elements.server.addEventListener("keydown", event => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                applyServerAddress();
+            }
+        });
+
+        function setChannelsCollapsed(collapsed) {
+            elements.channelsPanel.classList.toggle("collapsed", collapsed);
+            elements.channelToggle.textContent = collapsed ? "SHOW" : "HIDE";
+            elements.channelToggle.setAttribute("aria-expanded", String(!collapsed));
+            localStorage.setItem(channelCollapseStorageKey, collapsed ? "1" : "0");
+        }
+
+        setChannelsCollapsed(localStorage.getItem(channelCollapseStorageKey) === "1");
+        elements.channelToggle.addEventListener("click", () => {
+            setChannelsCollapsed(!elements.channelsPanel.classList.contains("collapsed"));
+        });
+        elements.channelRefresh.addEventListener("click", () => {
+            elements.channelCount.textContent = "LOADING";
+            loadChannels();
+        });
+
+        function setHeapPlotCollapsed(collapsed) {
+            elements.heapPlotPanel.classList.toggle("collapsed", collapsed);
+            elements.heapPlotToggle.textContent = collapsed ? "SHOW" : "HIDE";
+            elements.heapPlotToggle.setAttribute("aria-expanded", String(!collapsed));
+            localStorage.setItem(heapPlotStorageKey, collapsed ? "1" : "0");
+            if (!collapsed) drawHeapPlot();
+        }
+
+        setHeapPlotCollapsed(localStorage.getItem(heapPlotStorageKey) === "1");
+        elements.heapPlotToggle.addEventListener("click", () => {
+            setHeapPlotCollapsed(!elements.heapPlotPanel.classList.contains("collapsed"));
+        });
         elements.patDecoderOpen.addEventListener("click", openPatDecoder);
         elements.patDecoderClose.addEventListener("click", closePatDecoder);
+        elements.pidDrawerOpen.addEventListener("click", openPidDrawer);
+        elements.pidDrawerClose.addEventListener("click", closePidDrawer);
         elements.patDecoderBackdrop.addEventListener("click", event => {
             if (event.target === elements.patDecoderBackdrop) closePatDecoder();
         });
+        elements.pidDrawerBackdrop.addEventListener("click", event => {
+            if (event.target === elements.pidDrawerBackdrop) closePidDrawer();
+        });
+        elements.patDecoderBody.addEventListener("click", event => {
+            const program = event.target.closest(".decoder-program-row");
+            if (program) selectProgram(Number(program.dataset.programNumber), Number(program.dataset.pmtPid));
+        });
+        elements.patDecoderBody.addEventListener("change", event => {
+            if (event.target.matches(".decoder-stream-toggle")) {
+                togglePmtStream(Number(event.target.dataset.streamPid), event.target.checked);
+            }
+        });
+        elements.patDecoderBody.addEventListener("keydown", event => {
+            const program = event.target.closest(".decoder-program-row");
+            if (program && (event.key === "Enter" || event.key === " ")) {
+                event.preventDefault();
+                selectProgram(Number(program.dataset.programNumber), Number(program.dataset.pmtPid));
+            }
+        });
         document.addEventListener("keydown", event => {
             if (event.key === "Escape" && document.body.classList.contains("decoder-open")) closePatDecoder();
+            if (event.key === "Escape" && document.body.classList.contains("pid-drawer-open")) closePidDrawer();
         });
         loadChannels();
         refreshStatus();
+        refreshFilterStatus();
         setInterval(() => {
-            if (!document.hidden) refreshStatus();
+            if (!document.hidden && !serial.port) refreshStatus();
         }, 500);
+        setInterval(() => {
+            if (!document.hidden && !serial.port) refreshFilterStatus();
+        }, 1000);
     </script>
 </body>
 </html>

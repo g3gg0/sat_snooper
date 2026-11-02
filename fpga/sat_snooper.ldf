@@ -18,6 +18,9 @@
         <Source name="telemetry.v" type="Verilog" type_short="Verilog">
             <Options/>
         </Source>
+        <Source name="i2c_pid_filter.v" type="Verilog" type_short="Verilog">
+            <Options/>
+        </Source>
         <Source name="efb_define_def.v" type="Verilog" type_short="Verilog">
             <Options/>
         </Source>

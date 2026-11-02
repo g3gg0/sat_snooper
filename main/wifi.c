@@ -8,6 +8,7 @@
 #include "nvs_flash.h"
 #include "nvs.h" /* Added for NVS functions */
 #include "led.h"
+#include <stdlib.h>
 #include <string.h>
 
 
@@ -25,6 +26,12 @@
 #define NVS_NAMESPACE "wifi_creds"
 #define NVS_KEY_SSID "ssid"
 #define NVS_KEY_PASSWORD "password"
+#define WIFI_CREDENTIAL_TASK_STACK_SIZE 4096
+#define WIFI_CREDENTIAL_TASK_PRIORITY 2
+#define WIFI_RECONNECT_TASK_STACK_SIZE 4096
+#define WIFI_RECONNECT_TASK_PRIORITY 2
+#define WIFI_QUICK_RECONNECT_ATTEMPTS 3
+#define WIFI_RESCAN_BACKOFF_MS 3000
 
 static const char *TAG = "example_wps";
 static esp_wps_config_t config = WPS_CONFIG_INIT_DEFAULT(WPS_MODE);
@@ -32,6 +39,55 @@ static wifi_config_t wps_ap_creds[MAX_WPS_AP_CRED]; /* MAX_WPS_AP_CRED is usuall
 static int s_ap_creds_num = 0;
 static int s_retry_num = 0;
 static bool s_tried_nvs_creds = false; /* Flag to track if we tried connecting with NVS credentials */
+static bool s_connection_established = false;
+static bool s_ever_connected = false;
+static int s_reconnect_num = 0;
+static TaskHandle_t s_credential_task;
+static TaskHandle_t s_reconnect_task;
+
+static bool find_strongest_saved_ap(wifi_config_t *saved_config)
+{
+    uint16_t ap_count = 0;
+    wifi_ap_record_t *ap_records;
+    wifi_ap_record_t *best_ap = NULL;
+    bool found = false;
+
+    if (esp_wifi_scan_start(NULL, true) != ESP_OK ||
+        esp_wifi_scan_get_ap_num(&ap_count) != ESP_OK || ap_count == 0) {
+        ESP_LOGW(TAG, "Wi-Fi scan failed or found no access points.");
+        return false;
+    }
+
+    ap_records = calloc(ap_count, sizeof(*ap_records));
+    if (ap_records == NULL) {
+        ESP_LOGE(TAG, "Unable to allocate Wi-Fi scan results.");
+        return false;
+    }
+
+    if (esp_wifi_scan_get_ap_records(&ap_count, ap_records) == ESP_OK) {
+        for (uint16_t index = 0; index < ap_count; index++) {
+            if (strcmp((const char *)ap_records[index].ssid,
+                       (const char *)saved_config->sta.ssid) == 0 &&
+                (best_ap == NULL || ap_records[index].rssi > best_ap->rssi)) {
+                best_ap = &ap_records[index];
+            }
+        }
+    }
+
+    if (best_ap != NULL) {
+        found = true;
+        memcpy(saved_config->sta.bssid, best_ap->bssid, sizeof(saved_config->sta.bssid));
+        saved_config->sta.bssid_set = true;
+        saved_config->sta.channel = best_ap->primary;
+        ESP_LOGI(TAG, "Selected saved SSID %s on channel %d at RSSI %d dBm.",
+                 saved_config->sta.ssid, best_ap->primary, best_ap->rssi);
+    } else {
+        ESP_LOGW(TAG, "Saved SSID %s was not found during scan.", saved_config->sta.ssid);
+    }
+
+    free(ap_records);
+    return found;
+}
 
 static void wifi_led_status_task(void *arg)
 {
@@ -44,6 +100,99 @@ static void wifi_led_status_task(void *arg)
             led_set_wifi_status(false, -127);
         }
         vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+}
+
+static void save_wifi_credentials(void)
+{
+    wifi_config_t current_config;
+    esp_err_t err = esp_wifi_get_config(WIFI_IF_STA, &current_config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error getting current Wi-Fi config to save: %s", esp_err_to_name(err));
+        return;
+    }
+    if (current_config.sta.ssid[0] == '\0') {
+        ESP_LOGW(TAG, "Connected, but SSID is empty. Not saving credentials.");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Saving credentials for SSID: %s.", current_config.sta.ssid);
+    nvs_handle_t handle;
+    err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error opening NVS to save credentials: %s", esp_err_to_name(err));
+        return;
+    }
+
+    esp_err_t ssid_err = nvs_set_str(handle, NVS_KEY_SSID,
+                                     (const char *)current_config.sta.ssid);
+    esp_err_t password_err = nvs_set_str(handle, NVS_KEY_PASSWORD,
+                                         (const char *)current_config.sta.password);
+    if (ssid_err == ESP_OK && password_err == ESP_OK) {
+        err = nvs_commit(handle);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Credentials saved to NVS successfully.");
+        } else {
+            ESP_LOGE(TAG, "NVS commit failed: %s", esp_err_to_name(err));
+        }
+    } else {
+        ESP_LOGE(TAG, "NVS credential write failed. SSID: %s, password: %s",
+                 esp_err_to_name(ssid_err), esp_err_to_name(password_err));
+    }
+    nvs_close(handle);
+}
+
+static void wifi_credential_task(void *arg)
+{
+    (void)arg;
+    while (true) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        save_wifi_credentials();
+    }
+}
+
+static bool load_saved_credentials(wifi_config_t *saved_config)
+{
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        return false;
+    }
+
+    memset(saved_config, 0, sizeof(*saved_config));
+    size_t ssid_len = sizeof(saved_config->sta.ssid);
+    size_t pass_len = sizeof(saved_config->sta.password);
+    bool loaded =
+        nvs_get_str(handle, NVS_KEY_SSID, (char *)saved_config->sta.ssid, &ssid_len) == ESP_OK &&
+        ssid_len > 1 &&
+        nvs_get_str(handle, NVS_KEY_PASSWORD, (char *)saved_config->sta.password, &pass_len) == ESP_OK;
+
+    nvs_close(handle);
+    return loaded;
+}
+
+/* Runs outside the event loop because the scan blocks */
+static void wifi_reconnect_task(void *arg)
+{
+    (void)arg;
+    while (true) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(WIFI_RESCAN_BACKOFF_MS));
+        if (s_connection_established) {
+            continue;
+        }
+
+        wifi_config_t cfg;
+        if (load_saved_credentials(&cfg) && find_strongest_saved_ap(&cfg)) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &cfg));
+        } else if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK) {
+            /* Unpin the previously selected AP so the driver may pick any match */
+            cfg.sta.bssid_set = false;
+            cfg.sta.channel = 0;
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &cfg));
+        }
+
+        s_reconnect_num = 0;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
     }
 }
 
@@ -60,7 +209,21 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         case WIFI_EVENT_STA_DISCONNECTED:
             ESP_LOGI(TAG, "WIFI_EVENT_STA_DISCONNECTED");
             led_set_wifi_status(false, -127);
-            if (s_tried_nvs_creds) {
+            if (s_connection_established) {
+                s_connection_established = false;
+                s_reconnect_num = 0;
+                ESP_LOGW(TAG, "Wi-Fi link lost. Reconnecting.");
+                ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
+            } else if (s_reconnect_task && s_ever_connected) {
+                if (++s_reconnect_num <= WIFI_QUICK_RECONNECT_ATTEMPTS) {
+                    ESP_LOGW(TAG, "Reconnect attempt %d/%d.", s_reconnect_num,
+                             WIFI_QUICK_RECONNECT_ATTEMPTS);
+                    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
+                } else {
+                    ESP_LOGW(TAG, "Reconnect failed repeatedly. Rescanning for saved AP.");
+                    xTaskNotifyGive(s_reconnect_task);
+                }
+            } else if (s_tried_nvs_creds) {
                 ESP_LOGI(TAG, "Connection with saved NVS credentials failed.");
                 s_tried_nvs_creds = false; /* Reset flag */
                 s_retry_num = 0;           /* Reset retry for WPS */
@@ -119,8 +282,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                sizeof(evt->ap_cred[i].passphrase));
                     }
                     /* If multiple AP credentials are received from WPS, connect with first one */
-                    ESP_LOGI(TAG, "Connecting to SSID: %s, Passphrase: %s",
-                             wps_ap_creds[0].sta.ssid, wps_ap_creds[0].sta.password);
+                    ESP_LOGI(TAG, "Connecting to SSID: %s", wps_ap_creds[0].sta.ssid);
                     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &wps_ap_creds[0]) );
                 }
                 /*
@@ -160,56 +322,42 @@ static void got_ip_event_handler(void* arg, esp_event_base_t event_base,
 {
     ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
     ESP_LOGI(TAG, "Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
+    led_set_wifi_status(true, -127);
 
-    wifi_ap_record_t ap_info;
-    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-        led_set_wifi_status(true, ap_info.rssi);
-    } else {
-        led_set_wifi_status(true, -127);
-    }
-
-    /* Save the successful credentials to NVS */
-    wifi_config_t current_config;
-    esp_err_t err = esp_wifi_get_config(ESP_IF_WIFI_STA, &current_config);
-    if (err == ESP_OK) {
-        if (strlen((const char*)current_config.sta.ssid) > 0) { /* Ensure SSID is not empty */
-            ESP_LOGI(TAG, "Successfully connected to SSID: %s/%s. Saving credentials to NVS.", (char*)current_config.sta.ssid, (char*)current_config.sta.password);
-            nvs_handle_t my_handle;
-            err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &my_handle);
-            if (err == ESP_OK) {
-                esp_err_t err_ssid = nvs_set_str(my_handle, NVS_KEY_SSID, (const char*)current_config.sta.ssid);
-                esp_err_t err_pass = nvs_set_str(my_handle, NVS_KEY_PASSWORD, (const char*)current_config.sta.password);
-
-                if (err_ssid == ESP_OK && err_pass == ESP_OK) {
-                    err = nvs_commit(my_handle);
-                    if (err == ESP_OK) {
-                        ESP_LOGI(TAG, "Credentials saved to NVS successfully.");
-                    } else {
-                        ESP_LOGE(TAG, "NVS commit failed: %s", esp_err_to_name(err));
-                    }
-                } else {
-                    ESP_LOGE(TAG, "NVS set_str for SSID or Password failed. SSID_err: %s, Pass_err: %s",
-                             esp_err_to_name(err_ssid), esp_err_to_name(err_pass));
-                }
-                nvs_close(my_handle);
-            } else {
-                ESP_LOGE(TAG, "Error opening NVS to save credentials: %s", esp_err_to_name(err));
-            }
-        } else {
-            ESP_LOGW(TAG, "Connected, but SSID is empty. Not saving credentials.");
-        }
-    } else {
-        ESP_LOGE(TAG, "Error getting current Wi-Fi config to save: %s", esp_err_to_name(err));
+    if (s_credential_task) {
+        xTaskNotifyGive(s_credential_task);
     }
     s_tried_nvs_creds = false; /* Reset flag, as we are successfully connected (either via NVS or new WPS) */
+    s_connection_established = true;
+    s_ever_connected = true;
+    s_reconnect_num = 0;
 }
 
 /*init wifi as sta and start wps*/
 void wifi_start(void)
 {
+    if (!s_credential_task) {
+        BaseType_t task_created = xTaskCreate(wifi_credential_task, "wifi_creds",
+                                              WIFI_CREDENTIAL_TASK_STACK_SIZE, NULL,
+                                              WIFI_CREDENTIAL_TASK_PRIORITY,
+                                              &s_credential_task);
+        if (task_created != pdPASS) {
+            ESP_LOGE(TAG, "Unable to create Wi-Fi credential task.");
+            s_credential_task = NULL;
+        }
+    }
+
+    if (!s_reconnect_task) {
+        if (xTaskCreate(wifi_reconnect_task, "wifi_reconnect",
+                        WIFI_RECONNECT_TASK_STACK_SIZE, NULL,
+                        WIFI_RECONNECT_TASK_PRIORITY, &s_reconnect_task) != pdPASS) {
+            ESP_LOGE(TAG, "Unable to create Wi-Fi reconnect task.");
+            s_reconnect_task = NULL;
+        }
+    }
+
     esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
     assert(sta_netif);
-
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_init(&cfg));
 
@@ -218,6 +366,7 @@ void wifi_start(void)
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_ps(WIFI_PS_NONE));
     xTaskCreate(wifi_led_status_task, "wifi_led", 2048, NULL, 2, NULL);
 
     /* Attempt to load and connect with saved credentials */
@@ -232,13 +381,17 @@ void wifi_start(void)
         if (err == ESP_OK && ssid_len > 1) { /* ssid_len includes null terminator */
             err = nvs_get_str(my_handle, NVS_KEY_PASSWORD, (char *)saved_config.sta.password, &pass_len);
             if (err == ESP_OK) { /* Password can be empty for open networks */
-                ESP_LOGI(TAG, "Found saved credentials for SSID: %s. Attempting to connect.", saved_config.sta.ssid);
-                ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &saved_config));
-                s_tried_nvs_creds = true;
-                s_retry_num = 0; /* Reset retry count for NVS attempt */
-                esp_wifi_connect();
-                nvs_close(my_handle);
-                return; /* Exit wifi_start, connection attempt with NVS creds is in progress */
+                ESP_LOGI(TAG, "Scanning for saved SSID: %s.", saved_config.sta.ssid);
+                if (find_strongest_saved_ap(&saved_config)) {
+                    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &saved_config));
+                    s_tried_nvs_creds = true;
+                    s_connection_established = false;
+                    s_retry_num = 0; /* Reset retry count for NVS attempt */
+                    esp_wifi_connect();
+                    nvs_close(my_handle);
+                    return; /* Exit wifi_start, connection attempt with NVS creds is in progress */
+                }
+                ESP_LOGI(TAG, "Saved SSID not available. Proceeding to WPS.");
             } else {
                 ESP_LOGI(TAG, "Failed to read saved password (err: %s). Proceeding to WPS.", esp_err_to_name(err));
             }

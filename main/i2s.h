@@ -5,6 +5,7 @@
 #define I2S_SLAVE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 
@@ -14,14 +15,17 @@ extern "C" {
 
 #define I2S_TASK_STACK_SIZE 6188
 #define I2S_TASK_PRIORITY 5
-#define I2S_FPGA_MAX_PIDS 32
+#define I2S_FPGA_MAX_PIDS 127
 #define I2S_FPGA_PAT_SIZE 188
+#define I2S_RETAINED_PID_SLOT_COUNT 32
+#define I2S_RETAINED_PID_PACKET_CAPACITY 128
 
 typedef struct {
 	bool available;
 	uint32_t sync_count;
 	uint32_t data_bytes_received;
 	uint32_t sync_byte_errors;
+	uint16_t filtered_drops;
 } i2s_fpga_statistics_t;
 
 typedef struct {
@@ -35,6 +39,14 @@ typedef struct {
 	bool available;
 	uint8_t data[I2S_FPGA_PAT_SIZE];
 } i2s_fpga_pat_t;
+
+typedef struct {
+	bool available;
+	uint16_t pid;
+	uint8_t packet_count;
+	uint32_t packets_received;
+	uint32_t continuity_errors;
+} i2s_retained_pid_buffer_t;
 
 /**
  * @brief Initializes the I2S peripheral in slave RX mode.
@@ -50,6 +62,8 @@ void i2s_read_task(void *arg);
 void i2s_get_fpga_statistics(i2s_fpga_statistics_t *statistics);
 void i2s_get_fpga_pid_report(i2s_fpga_pid_report_t *report);
 void i2s_get_fpga_pat(i2s_fpga_pat_t *pat);
+void i2s_get_retained_pid_buffers(i2s_retained_pid_buffer_t buffers[I2S_RETAINED_PID_SLOT_COUNT]);
+size_t i2s_copy_retained_pid_packets(uint16_t pid, uint8_t *packets, size_t capacity);
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,4 @@
-/* MPEG-TS Sync and PID Matcher (Simplified for Sync)
+/* MPEG-TS Sync and PID Matcher
  * ----------------------------------------------------------------
  * - Waits for 0x47 (SYNC_BYTE) to appear when not in sync.
  * - Once 0x47 is found, it assumes sync and starts counting 188 bytes.
@@ -10,8 +10,6 @@ module mpeg_ts_sync_pid
 (
     input           clk,                /* System clock */
     input           rst_n,              /* Active-low reset */
-    input           data_valid,         /* Input data byte is valid */
-    input           packet_sync,        /* External start-of-packet indication */
     input   [7:0]   data_byte_in,       /* Input data byte */
 
     output  reg     sync_pulse,         /* High for one cycle at the start of a synced packet */
@@ -59,7 +57,7 @@ module mpeg_ts_sync_pid
             S_UNSYNCED: begin
                 is_in_sync <= 1'b0;
                 byte_counter <= 8'd0;
-                if (data_valid && packet_sync && (data_byte_in == SYNC_BYTE)) begin
+                if (data_byte_in == SYNC_BYTE) begin
                     current_state <= S_FIRST_SYNC;
                     is_in_sync <= 1'b1; /* Tentatively in sync */
                     sync_pulse <= 1'b1; /* Pulse for the first sync byte */
@@ -72,8 +70,38 @@ module mpeg_ts_sync_pid
 
             S_FIRST_SYNC: begin
                 is_in_sync <= 1'b1;
-                if (data_valid) begin
-                    byte_enable_out <= 1'b1;
+                byte_enable_out <= 1'b1;
+                packet_byte_index <= byte_counter;
+                if (byte_counter == 8'd1)
+                    pid_high_bits <= data_byte_in[4:0];
+                if (byte_counter == 8'd2) begin
+                    packet_pid <= {pid_high_bits, data_byte_in};
+                    pid_valid <= 1'b1;
+                end
+                if (byte_counter == (BYTES_PER_PKT - 1)) begin
+                    current_state <= S_SYNCED;
+                    byte_counter <= 8'd0;
+                end else begin
+                    byte_counter <= byte_counter + 1'b1;
+                end
+            end
+
+            S_SYNCED: begin
+                is_in_sync <= 1'b1;
+                byte_enable_out <= 1'b1;
+                if (byte_counter == 8'd0) begin /* Check 0th byte of new packet */
+                    if (data_byte_in == SYNC_BYTE) begin
+                        sync_pulse <= 1'b1;
+                        led_toggle_signal <= ~led_toggle_signal;
+                        packet_byte_index <= 8'd0;
+                        byte_counter <= 8'd1;
+                    end else begin
+                        current_state <= S_UNSYNCED; /* Lost sync */
+                        is_in_sync <= 1'b0;
+                        byte_enable_out <= 1'b0; /* Do not write this invalid packet's start */
+                        sync_error_pulse <= 1'b1;
+                    end
+                end else begin
                     packet_byte_index <= byte_counter;
                     if (byte_counter == 8'd1)
                         pid_high_bits <= data_byte_in[4:0];
@@ -81,44 +109,10 @@ module mpeg_ts_sync_pid
                         packet_pid <= {pid_high_bits, data_byte_in};
                         pid_valid <= 1'b1;
                     end
-                    if (byte_counter == (BYTES_PER_PKT - 1)) begin
-                        current_state <= S_SYNCED;
+                    if (byte_counter == (BYTES_PER_PKT - 1))
                         byte_counter <= 8'd0;
-                    end else begin
+                    else
                         byte_counter <= byte_counter + 1'b1;
-                    end
-                end
-            end
-
-            S_SYNCED: begin
-                is_in_sync <= 1'b1;
-                if (data_valid) begin
-                    byte_enable_out <= 1'b1;
-                    if (byte_counter == 8'd0) begin /* Check 0th byte of new packet */
-                        if (data_byte_in == SYNC_BYTE) begin
-                            sync_pulse <= 1'b1;
-                            led_toggle_signal <= ~led_toggle_signal;
-                            packet_byte_index <= 8'd0;
-                            byte_counter <= 8'd1;
-                        end else begin
-                            current_state <= S_UNSYNCED; /* Lost sync */
-                            is_in_sync <= 1'b0;
-                            byte_enable_out <= 1'b0; /* Do not write this invalid packet's start */
-                            sync_error_pulse <= 1'b1;
-                        end
-                    end else begin
-                        packet_byte_index <= byte_counter;
-                        if (byte_counter == 8'd1)
-                            pid_high_bits <= data_byte_in[4:0];
-                        if (byte_counter == 8'd2) begin
-                            packet_pid <= {pid_high_bits, data_byte_in};
-                            pid_valid <= 1'b1;
-                        end
-                        if (byte_counter == (BYTES_PER_PKT - 1))
-                            byte_counter <= 8'd0;
-                        else
-                            byte_counter <= byte_counter + 1'b1;
-                    end
                 end
             end
             default: current_state <= S_UNSYNCED;

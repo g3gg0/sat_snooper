@@ -1,5 +1,19 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "esp_err.h"
+
+#define FPGA_PID_FILTER_COUNT 4
+
+typedef struct
+{
+    bool enabled;
+    uint16_t pid;
+    uint16_t mask;
+} fpga_pid_filter_t;
+
 #define FPGA_FEABITS_WIDTH 16
 #define FPGA_FEABITS_DEFAULT (FPGA_MACHXO2_FEABITS_JTAG_PERSIST_DIS | FPGA_MACHXO2_FEABITS_SSP_PERSIST_DIS)
 
@@ -117,5 +131,6 @@ typedef struct
 } fpga_statusreg_t;
 
 void fpga_init();
+esp_err_t fpga_set_pid_filters(const fpga_pid_filter_t filters[FPGA_PID_FILTER_COUNT]);
 void fpga_prog(bool active);
 bool fpga_prog_get();
