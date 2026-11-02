@@ -1,0 +1,49 @@
+# ESP-IDF build outputs and downloaded dependencies.
+build/
+build-*/
+build_*/
+cmake-build-*/
+/managed_components/
+/esp-idf/
+
+# Local editor state, logs, dumps, and configuration backups.
+/.vscode/
+*.log
+*.log.bak
+*.dmp
+/log
+/coredump.txt
+/sdkconfig.old
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# Local Lattice reference design, not used by the sat_snooper project.
+/FPGA-RD-02073/
+
+# Diamond implementation outputs and local GUI state.
+# Keep HDL sources, .ldf/.lpf/.sty project files, and the EFB IP package.
+/fpga/test_firmware/
+/fpga/*_tcr.dir/
+/fpga/.vdbs/
+/fpga/.*.ini
+/fpga/*.edn
+/fpga/*.naf
+/fpga/*.sort
+/fpga/*.srp
+/fpga/*.sym
+/fpga/*.html
+/fpga/*.htm
+/fpga/Untitled.tpf*
+/fpga/_math_real.vhd
+/fpga/promote.xml
+/fpga/reportview.xml
+/fpga/sat_snooper.ccl
+/fpga/generate_core.tcl
+/fpga/generate_ngd.tcl
+
+# Generated simulator setup; retain the Verilog testbench.
+/fpga/sim/_math_real.vhd
+/fpga/sim/sim.*
+/fpga/sim/sim_para.tcl
+/fpga/sim/source_files.lst
