@@ -20,11 +20,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-/* Define the expected FPGA ID as a uint32_t */
-#define LCMXO2_256HC_QFN32_ID 0x012B8043
-#define LCMXO2_1200HC_QFN32_ID 0x012BA043
-/* https://bsdl.info/details.htm?sid=1667b5d760b4fa6288ca59b002289d77 */
-
 #define BITSTREAM_BLOCK_SIZE 128
 #define SOCKET_LISTENER_PORT 255
 #define SOCKET_RX_BUFFER_INITIAL_SIZE 1024
@@ -622,6 +617,40 @@ static int do_fpga_prog(int argc, char **argv)
     return 0;
 }
 
+static const char *fpga_machxo2_device_name(uint32_t idcode)
+{
+    /* The upper nibble is the silicon revision, not the device type. */
+    switch (idcode & UINT32_C(0x0fffffff))
+    {
+    case FPGA_MACHXO2_ID_256ZE:
+        return "LCMXO2-256ZE";
+    case FPGA_MACHXO2_ID_640ZE:
+        return "LCMXO2-640ZE";
+    case FPGA_MACHXO2_ID_1200ZE:
+        return "LCMXO2-1200ZE";
+    case FPGA_MACHXO2_ID_2000ZE:
+        return "LCMXO2-2000ZE";
+    case FPGA_MACHXO2_ID_4000ZE:
+        return "LCMXO2-4000ZE";
+    case FPGA_MACHXO2_ID_7000ZE:
+        return "LCMXO2-7000ZE";
+    case FPGA_MACHXO2_ID_256HC:
+        return "LCMXO2-256HC";
+    case FPGA_MACHXO2_ID_640HC:
+        return "LCMXO2-640HC";
+    case FPGA_MACHXO2_ID_1200HC:
+        return "LCMXO2-1200HC / LCMXO2-640UHC";
+    case FPGA_MACHXO2_ID_2000HC:
+        return "LCMXO2-2000HC / LCMXO2-1200UHC";
+    case FPGA_MACHXO2_ID_4000HC:
+        return "LCMXO2-4000HC / LCMXO2-2000UHC";
+    case FPGA_MACHXO2_ID_7000HC:
+        return "LCMXO2-7000HC";
+    default:
+        return NULL;
+    }
+}
+
 static int do_fpga_id(int argc, char **argv)
 {
     uint8_t id[4];
@@ -648,16 +677,13 @@ static int do_fpga_id(int argc, char **argv)
     ESP_LOGI(TAG, "FPGA ID: %02X %02X %02X %02X", id[0], id[1], id[2], id[3]);
 
     /* Combine the ID bytes into a uint32_t (big-endian) */
-    uint32_t fpga_id = (id[0] << 24) | (id[1] << 16) | (id[2] << 8) | id[3];
+    uint32_t fpga_id = ((uint32_t)id[0] << 24) | ((uint32_t)id[1] << 16) |
+                       ((uint32_t)id[2] << 8) | (uint32_t)id[3];
 
-    /* Check for specific FPGA ID and print chip type if matched */
-    if (fpga_id == LCMXO2_256HC_QFN32_ID)
+    const char *device_name = fpga_machxo2_device_name(fpga_id);
+    if (device_name)
     {
-        ESP_LOGI(TAG, "Detected chip type: LCMXO2 256HC QFN32");
-    }
-    else if (fpga_id == LCMXO2_1200HC_QFN32_ID)
-    {
-        ESP_LOGI(TAG, "Detected chip type: LCMXO2 1200HC QFN32");
+        ESP_LOGI(TAG, "Detected chip type: %s", device_name);
     }
     else
     {
