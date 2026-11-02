@@ -23,7 +23,8 @@ typedef struct
 #define FPGA_ADDR_CONF_RESET 0x43
 
 /* BSDL IDCODEs: https://bsdl.info/list.htm?f=788
- * Package and speed grade are not encoded; UHC variants share device IDs.
+ * HE aliases: https://github.com/trabucayre/openFPGALoader/blob/master/src/part.hpp
+ * Package and speed grade are not encoded; several variants share device IDs.
  */
 typedef enum
 {
@@ -42,6 +43,10 @@ typedef enum
     FPGA_MACHXO2_ID_640UHC = FPGA_MACHXO2_ID_1200HC,
     FPGA_MACHXO2_ID_1200UHC = FPGA_MACHXO2_ID_2000HC,
     FPGA_MACHXO2_ID_2000UHC = FPGA_MACHXO2_ID_4000HC,
+    FPGA_MACHXO2_ID_2000HE = FPGA_MACHXO2_ID_2000ZE,
+    FPGA_MACHXO2_ID_4000HE = FPGA_MACHXO2_ID_4000ZE,
+    FPGA_MACHXO2_ID_7000HE = FPGA_MACHXO2_ID_7000ZE,
+    FPGA_MACHXO2_ID_2000UHE = FPGA_MACHXO2_ID_4000ZE,
 } fpga_machxo2_id_t;
 
 typedef enum

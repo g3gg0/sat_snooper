@@ -629,11 +629,11 @@ static const char *fpga_machxo2_device_name(uint32_t idcode)
     case FPGA_MACHXO2_ID_1200ZE:
         return "LCMXO2-1200ZE";
     case FPGA_MACHXO2_ID_2000ZE:
-        return "LCMXO2-2000ZE";
+        return "LCMXO2-2000ZE / LCMXO2-2000HE";
     case FPGA_MACHXO2_ID_4000ZE:
-        return "LCMXO2-4000ZE";
+        return "LCMXO2-4000ZE / LCMXO2-4000HE / LCMXO2-2000UHE";
     case FPGA_MACHXO2_ID_7000ZE:
-        return "LCMXO2-7000ZE";
+        return "LCMXO2-7000ZE / LCMXO2-7000HE";
     case FPGA_MACHXO2_ID_256HC:
         return "LCMXO2-256HC";
     case FPGA_MACHXO2_ID_640HC:
